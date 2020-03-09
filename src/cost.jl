@@ -114,15 +114,15 @@ end
 Compute the error expansion along the entire trajectory
 	Assumes the cost expansion is already complete
 """
-@inline error_expansion!(E::Vector{<:SizedCostExpansion}, model::AbstractModel, Z::Traj, G) = nothing
-function error_expansion!(E::Vector{<:SizedCostExpansion}, model::RigidBody, Z::Traj, G)
+@inline error_expansion!(E::Vector{<:CostExpansion}, model::AbstractModel, Z::Traj, G) = nothing
+function error_expansion!(E::Vector{<:CostExpansion}, model::RigidBody, Z::Traj, G)
     for k in eachindex(E)
         error_expansion!(E[k], model, Z[k], G[k])
     end
 end
 
 "Compute the error expansion at a single KnotPoint (only for state vectors not in Vector space)"
-function error_expansion!(E::SizedCostExpansion{<:Any,N}, model::RigidBody, z, G) where N
+function error_expansion!(E::CostExpansion{<:Any,N}, model::RigidBody, z, G) where N
     if N < 15
         G = SMatrix(G)
         E.u_  .= E.u
@@ -145,7 +145,7 @@ function error_expansion!(E::SizedCostExpansion{<:Any,N}, model::RigidBody, z, G
 end
 
 "Copy the error expansion to another expansion"
-function error_expansion!(E::AbstractExpansion, Q::SizedCostExpansion)
+function error_expansion!(E::AbstractExpansion, Q::CostExpansion)
 	E.x  .= Q.x
 	E.u  .= Q.u
 	E.xx .= Q.xx
@@ -154,16 +154,16 @@ function error_expansion!(E::AbstractExpansion, Q::SizedCostExpansion)
 end
 
 "Get the error expansion"
-@inline function error_expansion(E::SizedCostExpansion, model::RigidBody)
+@inline function error_expansion(E::CostExpansion, model::RigidBody)
 	return StaticExpansion(E.x_, E.xx_, E.u_, E.uu_, E.ux_)
 end
 
 "Get the error expansion (same as cost expansion)"
-@inline function error_expansion(E::SizedCostExpansion, model::AbstractModel)
+@inline function error_expansion(E::CostExpansion, model::AbstractModel)
 	return StaticExpansion(E.x, E.xx, E.u, E.uu, E.ux)
 end
 
 "Get cost expansion"
-@inline function cost_expansion(E::SizedCostExpansion{<:Any,N,N}) where N
+@inline function cost_expansion(E::CostExpansion{<:Any,N,N}) where N
 	return StaticExpansion(E.x, E.xx, E.u, E.uu, E.ux)
 end

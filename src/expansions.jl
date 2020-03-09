@@ -8,7 +8,7 @@ struct GradientExpansion{T,N,M} <: AbstractExpansion{T}
 	end
 end
 
-struct SizedCostExpansion{T,N0,N,M} <: AbstractExpansion{T}
+struct CostExpansion{T,N0,N,M} <: AbstractExpansion{T}
 	# Cost Expansion Terms
 	x ::SizedVector{N0,T,1}
 	xx::SizedMatrix{N0,N0,T,2}
@@ -27,7 +27,7 @@ struct SizedCostExpansion{T,N0,N,M} <: AbstractExpansion{T}
 	x0::SizedVector{N0,T,1}  # gradient of cost function only (no multipliers)
 end
 
-function SizedCostExpansion{T}(n0::Int, n::Int, m::Int) where T
+function CostExpansion{T}(n0::Int, n::Int, m::Int) where T
 	x0  = SizedVector{n0}(zeros(T,n0))
 	xx0 = SizedMatrix{n0,n0}(zeros(T,n0,n0))
 	u0  = SizedVector{m}(zeros(T,m))
@@ -41,10 +41,10 @@ function SizedCostExpansion{T}(n0::Int, n::Int, m::Int) where T
 	ux = SizedMatrix{m,n}(zeros(T,m,n))
 	tmp = SizedMatrix{n0,n}(zeros(T,n0,n))
 	x_ = copy(x0)
-	SizedCostExpansion(x0,xx0,u0,uu0,ux0, x, xx, u, uu, ux, tmp, x_)
+	CostExpansion(x0,xx0,u0,uu0,ux0, x, xx, u, uu, ux, tmp, x_)
 end
 
-function SizedCostExpansion{T}(n::Int, m::Int) where T
+function CostExpansion{T}(n::Int, m::Int) where T
 	x  = SizedVector{n}(zeros(T,n))
 	xx = SizedMatrix{n,n}(zeros(T,n,n))
 	u  = SizedVector{m}(zeros(T,m))
@@ -52,23 +52,23 @@ function SizedCostExpansion{T}(n::Int, m::Int) where T
 	ux = SizedMatrix{m,n}(zeros(T,m,n))
 	tmp = SizedMatrix{n,n}(zeros(T,n,n))
 	x_ = copy(x)
-	SizedCostExpansion(x,xx,u,uu,ux, x, xx, u, uu, ux, tmp, x_)
+	CostExpansion(x,xx,u,uu,ux, x, xx, u, uu, ux, tmp, x_)
 end
 
 
-struct SizedExpansion{T,N0,N,M} <: AbstractExpansion{T}
+struct Expansion{T,N0,N,M} <: AbstractExpansion{T}
 	x::SizedVector{N,T,1}
 	xx::SizedMatrix{N,N,T,2}
 	u::SizedVector{M,T,1}
 	uu::SizedMatrix{M,M,T,2}
 	ux::SizedMatrix{M,N,T,2}
 	tmp::SizedMatrix{N0,N,T,2}
-	function SizedExpansion{T}(n::Int) where T
+	function Expansion{T}(n::Int) where T
 		x = SizedVector{n}(zeros(n))
 		xx = SizedMatrix{n,n}(zeros(n,n))
 		new{T,n,n,0}(x,xx)
 	end
-	function SizedExpansion{T}(n::Int,m::Int) where T
+	function Expansion{T}(n::Int,m::Int) where T
 		x = SizedVector{n}(zeros(n))
 		xx = SizedMatrix{n,n}(zeros(n,n))
 		u = SizedVector{m}(zeros(m))
@@ -76,7 +76,7 @@ struct SizedExpansion{T,N0,N,M} <: AbstractExpansion{T}
 		ux = SizedMatrix{m,n}(zeros(m,n))
 		new{T,n,n,m}(x,xx,u,uu,ux)
 	end
-	function SizedExpansion{T}(n0::Int,n::Int,m::Int) where T
+	function Expansion{T}(n0::Int,n::Int,m::Int) where T
 		x = SizedVector{n}(zeros(n))
 		xx = SizedMatrix{n,n}(zeros(n,n))
 		u = SizedVector{m}(zeros(m))
@@ -85,7 +85,7 @@ struct SizedExpansion{T,N0,N,M} <: AbstractExpansion{T}
 		tmp = SizedMatrix{n0,n}(zeros(n0,n))
 		new{T,n0,n,m}(x,xx,u,uu,ux,tmp)
 	end
-	function SizedExpansion(
+	function Expansion(
 			x::SizedVector{N,T,1},
 			xx::SizedMatrix{N,N,T,2},
 			u::SizedVector{M,T,1},

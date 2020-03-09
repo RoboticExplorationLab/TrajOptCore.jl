@@ -1,0 +1,4 @@
+name = "TrajOptCore"
+uuid = "6e71adf8-10e1-430f-8fc1-65a685ba327f"
+authors = ["Brian Jackson <bjack205@gmail.com>"]
+version = "0.1.0"

@@ -21,7 +21,7 @@ quadcost = LQRCost(Q,R,xf)
 @test quadcost.r == zeros(m)
 @test quadcost.c == 0.5*xf'Q*xf
 
-quadcost = TO.LQRCostTerminal(Q,xf)
+quadcost = TOC.LQRCostTerminal(Q,xf)
 @test quadcost.Q == Q
 @test quadcost.q == -Q*xf
 @test isempty(quadcost.R)

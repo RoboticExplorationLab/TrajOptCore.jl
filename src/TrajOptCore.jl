@@ -11,10 +11,37 @@ using UnsafeArrays
 import Dynamics: Implicit, Explicit, AbstractKnotPoint, DEFAULT_Q, is_terminal, state_diff, StaticKnotPoint
 import Dynamics: jacobian!, error_expansion!, error_expansion, state_dim, control_dim  # extended methods
 
+# problems
 export
+    Problem,
+    initial_controls!,
+    initial_states!,
+    rollout!
+
+# cost functions
+export
+    AbstractObjective,
+    Objective,
     LQRObjective,
-    rollout!,
-    evaluate!
+    QuadraticCost,
+    LQRCost,
+    Expansion,
+    CostExpansion,
+    cost,
+    StaticExpansion,
+    cost_expansion!,
+    error_expansion!
+
+
+# constraints
+export
+    AbstractConstraint,
+    ConstraintSet,
+    ConstraintParams,
+    evaluate!,
+    update_active_set!,
+    max_violation
+
 
 include("expansions.jl")
 include("costfunctions.jl")

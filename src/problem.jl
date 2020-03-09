@@ -40,15 +40,15 @@ struct Problem{Q<:QuadratureRule,T<:AbstractFloat}
     model::AbstractModel
     obj::AbstractObjective
     constraints::ConstraintSet{T}
-    x0::SVector
-    xf::SVector
+    x0::MVector
+    xf::MVector
     Z::Traj
     N::Int
     t0::T
     tf::T
     function Problem{Q}(model::AbstractModel, obj::AbstractObjective,
             constraints::ConstraintSet,
-            x0::SVector, xf::SVector,
+            x0::StaticVector, xf::StaticVector,
             Z::Traj, N::Int, t0::T, tf::T) where {Q,T}
         n,m = size(model)
         @assert length(x0) == length(xf) == n
@@ -143,6 +143,15 @@ function initial_states!(prob::Problem, X0::AbstractMatrix)
     set_states!(prob.Z, X0)
 end
 
+"""```julia
+set_initial_state!(prob::Problem, x0::AbstractVector)
+```
+Set the initial state in `prob` to `x0`
+"""
+function set_initial_state!(prob::Problem, x0::AbstractVector)
+    prob.x0 .= x0
+end
+
 "```julia
 initial_controls!(::Union{Problem,AbstractSolver}, U0::Vector{<:AbstractVector})
 initial_controls!(::Union{Problem,AbstractSolver}, U0::AbstractMatrx)
@@ -181,6 +190,9 @@ end
 num_constraints(prob::Problem) = get_constraints(prob).p
 
 @inline get_constraints(prob::Problem) = prob.constraints
+@inline get_model(prob::Problem) = prob.model
+@inline get_objective(prob::Problem) = prob.obj
+@inline get_trajectory(prob::Problem) = prob.Z
 
 
 "```julia

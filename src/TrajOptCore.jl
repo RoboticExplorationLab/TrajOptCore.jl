@@ -13,7 +13,8 @@ import Dynamics: jacobian!, error_expansion!, error_expansion, state_dim, contro
 
 export
     LQRObjective,
-    rollout!
+    rollout!,
+    evaluate!
 
 include("expansions.jl")
 include("costfunctions.jl")
@@ -22,6 +23,7 @@ include("objective.jl")
 include("abstract_constraint.jl")
 include("constraints.jl")
 include("dynamics_constraints.jl")
+include("integration.jl")
 
 include("cost.jl")
 include("constraint_vals.jl")

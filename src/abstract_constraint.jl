@@ -1,16 +1,16 @@
-export
-	ConstraintSense,
-	Inequality,
-	Equality,
-	Stage,
-	State,
-	Control,
-	Coupled,
-	Dynamical
-
-export
-	evaluate,
-	jacobian
+# export
+# 	ConstraintSense,
+# 	Inequality,
+# 	Equality,
+# 	Stage,
+# 	State,
+# 	Control,
+# 	Coupled,
+# 	Dynamical
+#
+# export
+# 	evaluate,
+# 	jacobian
 
 
 abstract type GeneralConstraint end

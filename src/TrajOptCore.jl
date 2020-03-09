@@ -16,32 +16,82 @@ export
     Problem,
     initial_controls!,
     initial_states!,
-    rollout!
+	initial_trajectory!,
+	set_initial_state!,
+    rollout!,
+	integration,
+	change_integration,
+	get_constraints,
+	get_model,
+	get_objective,
+	get_trajectory
 
 # cost functions
 export
     AbstractObjective,
     Objective,
     LQRObjective,
+	CostFunction,
     QuadraticCost,
     LQRCost,
-    Expansion,
+    LQRCostTerminal,
+    cost
+
+# cost expansion
+export
     CostExpansion,
-    cost,
+    Expansion,
     StaticExpansion,
     cost_expansion!,
-    error_expansion!
+    cost_hessian!,
+    cost_gradient!,
+    error_expansion!,
+    error_expansion
 
-
-# constraints
+# constraint types
 export
     AbstractConstraint,
-    ConstraintSet,
-    ConstraintParams,
+    Inequality,
+    Equality,
+    Stage,
+    State,
+    Control,
+    Coupled,
+    Dynamical,
+    ConstraintParams
+
+# constraint methods
+export
+    evaluate,
+    jacobian,
+    evaluate!,
+    jacobian!,
     evaluate!,
     update_active_set!,
-    max_violation
+    max_violation,
+    findmax_violation,
+    is_bound,
+    upper_bound,
+    lower_bound
 
+# implemented constraints
+export
+	DynamicsConstraint,
+	GoalConstraint,
+	BoundConstraint,
+	CircleConstraint,
+	SphereConstraint,
+	NormConstraint,
+	LinearConstraint,
+	VariableBoundConstraint,
+	QuatNormConstraint,
+	QuatSlackConstraint
+
+# constraint sets
+export
+    ConstraintSet,
+	ConstraintVals,
+    add_constraint!
 
 include("expansions.jl")
 include("costfunctions.jl")

@@ -1,13 +1,13 @@
-export
-	GoalConstraint,
-	BoundConstraint,
-	CircleConstraint,
-	SphereConstraint,
-	NormConstraint,
-	LinearConstraint,
-	VariableBoundConstraint,
-	QuatNormConstraint,
-	QuatSlackConstraint
+# export
+# 	GoalConstraint,
+# 	BoundConstraint,
+# 	CircleConstraint,
+# 	SphereConstraint,
+# 	NormConstraint,
+# 	LinearConstraint,
+# 	VariableBoundConstraint,
+# 	QuatNormConstraint,
+# 	QuatSlackConstraint
 
 
 

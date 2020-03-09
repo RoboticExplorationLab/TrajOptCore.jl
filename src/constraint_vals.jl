@@ -1,5 +1,5 @@
-export
-	ConstraintVals
+# export
+# 	ConstraintVals
 
 mutable struct ConstraintParams{T}
 	ϕ::T  	    # penalty scaling parameter

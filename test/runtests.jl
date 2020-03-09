@@ -16,3 +16,7 @@ end
 @testset "Problem" begin
     include("problem.jl")
 end
+
+@testset "Costs" begin
+    include("cost_tests.jl")
+end

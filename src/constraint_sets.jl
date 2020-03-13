@@ -102,8 +102,8 @@ function add_constraint!(conSet::ConstraintSet, conVal::ConstraintVals, idx=-1)
 end
 
 function add_constraint!(conSet::ConstraintSet, con::AbstractConstraint,
-		inds::UnitRange, idx=-1)
-	conVal = ConstraintVals(con, inds)
+		inds::UnitRange, idx=-1; ArrayType=SizedArray, kwargs...)
+	conVal = ConstraintVals(con, inds, ArrayType, kwargs...)
 	add_constraint!(conSet, conVal, idx)
 end
 

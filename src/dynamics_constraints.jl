@@ -59,8 +59,9 @@ end
 @inline DynamicsConstraint(model, N) = DynamicsConstraint{DEFAULT_Q}(model, N)
 integration(::DynamicsConstraint{Q}) where Q = Q
 
-width(con::DynamicsConstraint{<:Implicit,L,T,N,M,NM}) where {L,T,N,M,NM} = 2N+M
-width(con::DynamicsConstraint{<:Explicit,L,T,N,M,NM}) where {L,T,N,M,NM} = 2NM
+widths(con::DynamicsConstraint{<:Any,<:Any,<:Any,<:Any,<:Any,NM}) where {N,M,NM} = (NM,NM)
+# width(con::DynamicsConstraint{<:Implicit,L,T,N,M,NM}) where {L,T,N,M,NM} = 2N+M
+# width(con::DynamicsConstraint{<:Explicit,L,T,N,M,NM}) where {L,T,N,M,NM} = 2NM
 ####!
 
 # Implicit
@@ -71,15 +72,18 @@ function evaluate!(vals::Vector{<:AbstractVector}, con::DynamicsConstraint{Q},
 	end
 end
 
-function jacobian!(∇c::Vector{<:SizedMatrix}, con::DynamicsConstraint{Q,L,T,N},
+function jacobian!(∇c::Matrix{<:SizedMatrix}, con::DynamicsConstraint{Q,L,T,N},
 		Z::Vector{<:AbstractKnotPoint{T,n,m}}, inds=1:length(Z)-1) where {Q<:Implicit,L,T,N,n,m}
 	In = Diagonal(@SVector ones(N))
+	ix = Z[1]._x
 	zinds = [Z[1]._x; Z[1]._u]
 	for k in inds
-		∇f = uview(∇c[k].data, 1:n, 1:n+m+1)
+		# ∇f = uview(∇c[k].data, 1:n, 1:n+m+1)
+		∇f = ∇c[k,1]
 		discrete_jacobian!(Q, ∇f, con.model, Z[k])
-		∇f2 = uview(∇c[k].data, 1:n, n+m .+ (1:n))
-		∇f2 .= -Diagonal(@SVector ones(n))
+		# ∇f2 = uview(∇c[k].data, 1:n, n+m .+ (1:n))
+		∇f2 = ∇c[k,2]
+		∇f2[ix,ix] .= -Diagonal(@SVector ones(n))
 	end
 end
 

@@ -1,6 +1,6 @@
 module TrajOptCore
 
-using Dynamics
+using RobotDynamics
 using DifferentialRotations
 using StaticArrays
 using LinearAlgebra
@@ -8,8 +8,8 @@ using DocStringExtensions
 using ForwardDiff
 using UnsafeArrays
 
-import Dynamics: Implicit, Explicit, AbstractKnotPoint, DEFAULT_Q, is_terminal, state_diff, StaticKnotPoint
-import Dynamics: jacobian!, error_expansion!, error_expansion, state_dim, control_dim  # extended methods
+import RobotDynamics: Implicit, Explicit, AbstractKnotPoint, DEFAULT_Q, is_terminal, state_diff, StaticKnotPoint
+import RobotDynamics: jacobian!, error_expansion!, error_expansion, state_dim, control_dim  # extended methods
 
 # problems
 export
@@ -91,7 +91,8 @@ export
 export
     ConstraintSet,
 	ConstraintVals,
-    add_constraint!
+    add_constraint!,
+	num_constraints
 
 include("expansions.jl")
 include("costfunctions.jl")

@@ -53,11 +53,16 @@ function ConstraintVals(con::C, inds::UnitRange, MT::Type=SizedMatrix, kwargs...
 	if MT <: SizedArray
 		∇c = [SizedMatrix{p,w[i]}(zeros(Float64,p,w[i])) for k = 1:P, i = 1:nw]
 	elseif MT <: SubArray
-		∇c = [view(zeros(Float64,p,w),1:p,1:w[i]) for k = 1:P, i = 1:nw]
+		∇c = [view(zeros(Float64,p,w[i]),1:p,1:w[i]) for k = 1:P, i = 1:nw]
 	end
 	params = ConstraintParams(;kwargs...)
 	ConstraintVals(con, inds, vals, deepcopy(vals), ∇c, λ, μ, atv, zeros(P),
 		params)
+end
+
+function ConstraintVals(conVal::ConstraintVals, ∇c::Matrix{<:AbstractMatrix})
+	ConstraintVals(conVal.con, conVal.inds, conVal.vals, conVal.vals_prev,
+		∇c, conVal.λ, conVal.μ, conVal.active, conVal.c_max, conVal.params)
 end
 
 get_params(con::ConstraintVals)::ConstraintParams = con.params

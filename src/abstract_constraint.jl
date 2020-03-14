@@ -213,7 +213,7 @@ For W<:Coupled this will loop over calls to `jacobian(con,Z[k+1],Z[k])`
 For W<:General,this must function must be explicitly defined. Other types may define it
 	if desired.
 """
-function jacobian!(∇c::VecOrMat{<:SizedMatrix}, con::AbstractConstraint{<:Any,<:Stage},
+function jacobian!(∇c::VecOrMat{<:AbstractMatrix}, con::AbstractConstraint{<:Any,<:Stage},
 		Z::Traj, inds=1:length(Z))
 	for (i,k) in enumerate(inds)
 		jacobian!(∇c[i], con, Z[k])

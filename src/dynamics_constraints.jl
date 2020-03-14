@@ -72,7 +72,7 @@ function evaluate!(vals::Vector{<:AbstractVector}, con::DynamicsConstraint{Q},
 	end
 end
 
-function jacobian!(∇c::Matrix{<:SizedMatrix}, con::DynamicsConstraint{Q,L,T,N},
+function jacobian!(∇c::Matrix{<:AbstractMatrix}, con::DynamicsConstraint{Q,L,T,N},
 		Z::Vector{<:AbstractKnotPoint{T,n,m}}, inds=1:length(Z)-1) where {Q<:Implicit,L,T,N,n,m}
 	In = Diagonal(@SVector ones(N))
 	ix = Z[1]._x

@@ -95,16 +95,15 @@ function LQRObjective(
         Qf::AbstractArray, xf::AbstractVector, N::Int;
         uf=(@SVector zeros(m)),
         checks=true) where {T,n,m}
-    H = @SMatrix zeros(m,n)
     q = -Q*xf
     r = -R*uf
     c = 0.5*xf'*Q*xf + 0.5*uf'R*uf
     qf = -Qf*xf
     cf = 0.5*xf'*Qf*xf
 
-    ℓ = QuadraticCost(Q, R, H, q, r, c, checks=checks)
+    ℓ = DiagonalCost(Q, R, q, r, c)
 
-    ℓN = QuadraticCost(Qf, R, H, qf, r, cf, checks=checks)
+    ℓN = DiagonalCost(Qf, R, qf, r, cf)
 
     Objective(ℓ, ℓN, N)
 end

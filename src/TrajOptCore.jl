@@ -33,6 +33,7 @@ export
     LQRObjective,
 	CostFunction,
     QuadraticCost,
+	DiagonalCost,
     LQRCost,
     LQRCostTerminal,
     cost

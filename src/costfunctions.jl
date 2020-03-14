@@ -21,6 +21,41 @@ abstract type CostFunction end
 #              COST FUNCTION INTERFACE                #
 #######################################################
 
+struct DiagonalCost{N,M,T} <: CostFunction
+    Q::Diagonal{T,SVector{N,T}}
+    R::Diagonal{T,SVector{M,T}}
+    q::SVector{N,T}
+    r::SVector{M,T}
+    c::T
+end
+
+function DiagonalCost(Q::Diagonal{<:Any,SVector{n}},R::Diagonal{<:Any,SVector{m}},
+        q=(@SVector zeros(n)), r=(@SVector zeros(m)), c=0) where {n,m}
+    DiagonalCost(Q,R,q,r,c)
+end
+
+state_dim(::DiagonalCost{n}) where n = n
+control_dim(::DiagonalCost{<:Any,m}) where m = m
+
+function stage_cost(cost::DiagonalCost, x, u)
+    return cost.r'u + 0.5*u'cost.R*u + stage_cost(cost, x)
+end
+
+function stage_cost(cost::DiagonalCost, x)
+    return 0.5*x'cost.Q*x + cost.q'x + cost.c
+end
+
+function gradient!(E::AbstractExpansion, cost::QuadraticCost, x, u)
+    E.x .= cost.Q*x .+ cost.q
+    E.u .= cost.R*u .+ cost.r
+end
+
+function hessian!(E::AbstractExpansion, cost::QuadraticCost, x, u)
+    E.xx .= cost.Q
+    E.uu .= cost.R
+    E.ux .= 0
+end
+
 """
 $(TYPEDEF)
 Cost function of the form
@@ -95,6 +130,14 @@ function LQRCost(Q::AbstractArray, R::AbstractArray,
     r = -R*uf
     c = 0.5*xf'*Q*xf + 0.5*uf'R*uf
     return QuadraticCost(Q, R, H, q, r, c, checks=checks)
+end
+
+function LQRCost(Q::Diagonal{<:Any,SVector{n}},R::Diagonal{<:Any,SVector{m}},
+        xf::AbstractVector, uf=(@SVector zeros(m))) where {n,m}
+    q = -Q*xf
+    r = -R*uf
+    c = 0.5*xf'*Q*xf + 0.5*uf'R*uf
+    return DiagonalCost(Q, R, H, q, r, c)
 end
 
 """

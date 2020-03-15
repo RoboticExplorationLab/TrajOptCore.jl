@@ -45,12 +45,12 @@ function stage_cost(cost::DiagonalCost, x)
     return 0.5*x'cost.Q*x + cost.q'x + cost.c
 end
 
-function gradient!(E::AbstractExpansion, cost::QuadraticCost, x, u)
+function gradient!(E::AbstractExpansion, cost::DiagonalCost, x, u)
     E.x .= cost.Q*x .+ cost.q
     E.u .= cost.R*u .+ cost.r
 end
 
-function hessian!(E::AbstractExpansion, cost::QuadraticCost, x, u)
+function hessian!(E::AbstractExpansion, cost::DiagonalCost, x, u)
     E.xx .= cost.Q
     E.uu .= cost.R
     E.ux .= 0

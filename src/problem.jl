@@ -212,3 +212,22 @@ function Problem(p::Problem; model=p.model, obj=p.obj, constraints=p.constraints
     x0=p.x0, xf=p.xf, t0=p.t0, tf=p.tf)
     Problem(model, obj, constraints, x0, xf, p.Z, p.N, t0, tf)
 end
+
+"```julia
+add_dynamics_constraints!(prob::Problem)
+```
+Add dynamics constraints to the constraint set"
+function add_dynamics_constraints!(prob::Problem{Q}, integration=Q) where Q
+	n,m = size(prob)
+    conSet = prob.constraints
+
+    # Implicit dynamics
+    dyn_con = ConstraintVals(DynamicsConstraint{integration}(prob.model, prob.N), 1:prob.N-1)
+    add_constraint!(conSet, dyn_con) # add it at the end
+
+    # Initial condition
+    init_con = ConstraintVals( GoalConstraint(prob.x0), 1:1)
+    add_constraint!(conSet, init_con, 1)  # add it at the top
+
+    return nothing
+end

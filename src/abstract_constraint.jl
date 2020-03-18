@@ -239,12 +239,15 @@ for method in [:evaluate]#, :jacobian]
 end
 
 # Default method for converting KnotPoints to states and controls
-@inline jacobian!(∇c, con::AbstractConstraint{<:Any,State}, z::AbstractKnotPoint) =
+@inline jacobian!(∇c, con::AbstractConstraint{<:Any,State}, z::AbstractKnotPoint, i=1) =
 	jacobian!(∇c, con, state(z))
-@inline jacobian!(∇c, con::AbstractConstraint{<:Any,Control}, z::AbstractKnotPoint) =
+@inline jacobian!(∇c, con::AbstractConstraint{<:Any,Control}, z::AbstractKnotPoint, i=1) =
 	jacobian!(∇c, con, control(z))
+@inline jacobian!(∇c, con::AbstractConstraint{<:Any,<:Coupled}, z::AbstractKnotPoint, i=1) =
+	jacobian!(∇c, con, z, i)
 
 function jacobian!(∇c, con::AbstractConstraint{<:Any,W}, x::SVector) where {W<:Union{State,Control}}
 	eval_c(x) = evaluate(con, x)
 	∇c .= ForwardDiff.jacobian(eval_c, x)
+	return false
 end

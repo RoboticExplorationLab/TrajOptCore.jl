@@ -11,6 +11,11 @@ using UnsafeArrays
 import RobotDynamics: Implicit, Explicit, AbstractKnotPoint, DEFAULT_Q, is_terminal, state_diff, StaticKnotPoint
 import RobotDynamics: jacobian!, error_expansion!, error_expansion, state_dim, control_dim  # extended methods
 
+# re-export
+import RobotDynamics: KnotPoint
+export
+	KnotPoint
+
 # problems
 export
     Problem,
@@ -59,7 +64,8 @@ export
     Control,
     Coupled,
     Dynamical,
-    ConstraintParams
+    ConstraintParams,
+	ConstraintBlock
 
 # constraint methods
 export
@@ -107,6 +113,7 @@ include("integration.jl")
 include("cost.jl")
 include("constraint_vals.jl")
 include("constraint_sets.jl")
+include("constraint_block.jl")
 include("problem.jl")
 
 include("utils.jl")

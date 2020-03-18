@@ -65,6 +65,10 @@ widths(con::DynamicsConstraint{<:Any,<:Any,<:Any,<:Any,<:Any,NM}) where {N,M,NM}
 ####!
 
 # Implicit
+function evaluate(con::DynamicsConstraint{Q}, z1::KnotPoint, z2::KnotPoint) where Q
+	discrete_dynamics(Q, con.model, z1) - state(z2)
+end
+
 function evaluate!(vals::Vector{<:AbstractVector}, con::DynamicsConstraint{Q},
 		Z::Traj, inds=1:length(Z)-1) where Q<:Implicit
 	for k in inds
@@ -85,6 +89,24 @@ function jacobian!(∇c::Matrix{<:AbstractMatrix}, con::DynamicsConstraint{Q,L,T
 		∇f2 = ∇c[k,2]
 		∇f2[ix,ix] .= -Diagonal(@SVector ones(n))
 	end
+end
+
+function jacobian!(∇c, con::DynamicsConstraint{Q}, z::KnotPoint{<:Any,n}, ::Val{1}) where {Q,n}
+	discrete_jacobian!(Q, ∇c, con.model, z)
+	# return false  # not constant
+end
+
+function jacobian!(∇c, con::DynamicsConstraint{Q}, z::KnotPoint{<:Any,n}, i=1) where {Q,n}
+	if i == 1
+		discrete_jacobian!(Q, ∇c, con.model, z)
+		return false  # not constant
+	elseif i == 2
+		for i = 1:n
+			∇c[i,i] = -1
+		end
+		return true   # is constant
+	end
+	# return nothing
 end
 
 

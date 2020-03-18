@@ -37,11 +37,11 @@ end
 state_dim(::DiagonalCost{n}) where n = n
 control_dim(::DiagonalCost{<:Any,m}) where m = m
 
-function stage_cost(cost::DiagonalCost, x, u)
+function stage_cost(cost::DiagonalCost, x::SVector, u::SVector)
     return cost.r'u + 0.5*u'cost.R*u + stage_cost(cost, x)
 end
 
-function stage_cost(cost::DiagonalCost, x)
+function stage_cost(cost::DiagonalCost, x::SVector)
     return 0.5*x'cost.Q*x + cost.q'x + cost.c
 end
 

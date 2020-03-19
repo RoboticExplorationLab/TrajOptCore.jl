@@ -12,38 +12,19 @@ struct ConstraintBlock{T,VT,VV,MT,MV,D}
     dynamics::D
     y::VT
     Y::MT
-    JYt::Matrix{T}
-    YYt::Matrix{T}
+    YYt::Matrix{T}  # outer product => Shur compliment
+    YJ::Matrix{T}   # partial Shur compliment
+    r::Vector{T}    # Shur compliment residual
+    r_::Vector{SubArray{T,1,Vector{T},Tuple{UnitRange{Int}},true}}
 
     D2::SubArray{T,2,MV,Tuple{UnitRange{Int},UnitRange{Int}},false}
     c::SubArray{T,1,VV,Tuple{UnitRange{Int}},true}
+    C::SubArray{T,2,MV,Tuple{UnitRange{Int},UnitRange{Int}},false}
     c_::Vector{SubArray{T,1,VV,Tuple{UnitRange{Int}},true}}
-    C::Vector{SubArray{T,2,MV,Tuple{UnitRange{Int},UnitRange{Int}},false}}
+    C_::Vector{SubArray{T,2,MV,Tuple{UnitRange{Int},UnitRange{Int}},false}}
     d::SubArray{T,1,VV,Tuple{UnitRange{Int}},true}
     D1::SubArray{T,2,MV,Tuple{UnitRange{Int},UnitRange{Int}},false}
     type::Symbol
-end
-
-function _block_size(dyn, cons, type)
-    n,m = size(dyn.model)
-    if type==:terminal
-        n2,m2 = 0,0
-    else
-        n2,m2 = n,m
-    end
-    if type==:initial
-        n1,m1 = 0,0
-    else
-        n1,m1 = n,m
-    end
-
-    if isempty(cons)
-        cons = AbstractConstraint[]
-        p = zeros(Int,0)
-    else
-        p = length.(cons)
-    end
-    return n1,p,n2
 end
 
 function ConstraintBlock(dyn::DynamicsConstraint{<:Any,<:Any,T},
@@ -74,23 +55,26 @@ function ConstraintBlock(dyn::DynamicsConstraint{<:Any,<:Any,T},
     if isempty(y)
         y = zeros(T, sum(p) + n2)
     end
-    JYt = zeros(T, bm,bn)
     YYt = zeros(T, bn,bn)
+    YJ = zeros(T, bn,bm)
+    r = zeros(T, bn)
+    r_ = [view(r,1:n1), view(r,n1 .+ (1:sum(p))), view(r, (n1 + sum(p)) .+ (1:n2))]
 
     # e_ = [view(y, e_inds[i] .+ (1:p_prev[i+1])) for i = 1:length(prev)]
     D2 = view(Y, 1:n1, 1:n1+m)
     if isempty(cons)
         c_ = SubArray{T,1,Vector{T},Tuple{UnitRange{Int}},true}[]
-        C = SubArray{T,2,Matrix{T},Tuple{UnitRange{Int},UnitRange{Int}},false}[]
+        C_ = SubArray{T,2,Matrix{T},Tuple{UnitRange{Int},UnitRange{Int}},false}[]
     else
         inds = pushfirst!(cumsum(p),0)
         c_ = [view(y, inds[i] .+ (1:p[i])) for i = 1:length(cons)]
-        C = [view(Y, (inds[i] + n1) .+ (1:p[i]), zinds(cons[i],n,m)) for i = 1:length(cons)]
+        C_ = [view(Y, (inds[i] + n1) .+ (1:p[i]), zinds(cons[i],n,m)) for i = 1:length(cons)]
     end
     c = view(y, 1:sum(p))
+    C = view(Y, n1 .+ (1:sum(p)), 1:n+m)
     d = view(y, sum(p) .+ (1:n2))
     D1 = view(Y, (sum(p) + n1) .+ (1:n2), 1:n+m)
-    ConstraintBlock(cons,dyn,y,Y,JYt,YYt, D2, c,c_,C, d,D1, type)
+    ConstraintBlock(cons,dyn,y,Y,YYt,YJ,r,r_, D2, c,C, c_,C_, d,D1, type)
 end
 
 Base.size(block::ConstraintBlock) = size(block.Y)
@@ -101,10 +85,14 @@ zinds(con::AbstractConstraint{<:Any,Control},n,m) = n .+ (1:m)
 zinds(con::AbstractConstraint{<:Any,Stage},n,m) = 1:n+m
 
 function evaluate!(block::ConstraintBlock, z1::KnotPoint, z2::KnotPoint)
-    for i in eachindex(block.c_)
-        evaluate!(block.c_[i], block.cons[i], z1)
-    end
+    evaluate!(block, z1)
     block.d .= evaluate(block.dynamics, z1, z2)
+end
+
+function evaluate!(block::ConstraintBlock, z::KnotPoint)
+    for i in eachindex(block.c_)
+        evaluate!(block.c_[i], block.cons[i], z)
+    end
 end
 
 evaluate!(val, con::AbstractConstraint, z::KnotPoint) = val .= evaluate(con, z)
@@ -115,8 +103,8 @@ function jacobian!(block::ConstraintBlock, z::KnotPoint)
     if block.type != :initial
         jacobian!(block.D2, block.dynamics, z, 2)
     end
-    for i in eachindex(block.C)
-        jacobian!(block.C[i], block.cons[i], z)
+    for i in eachindex(block.C_)
+        jacobian!(block.C_[i], block.cons[i], z)
     end
     if block.type != :terminal
         jacobian!(block.D1, block.dynamics, z, 1)
@@ -156,9 +144,11 @@ function ConstraintBlocks(conSet::ConstraintSet)
 end
 
 function evaluate!(blocks::ConstraintBlocks, Z::Traj)
-    for k = 1:length(Z)-1
+    N = length(Z)
+    for k = 1:N-1
         evaluate!(blocks[k], Z[k], Z[k+1])
     end
+    evaluate!(blocks[N], Z[N])
 end
 
 function jacobian!(blocks::ConstraintBlocks, Z::Traj)
@@ -178,7 +168,7 @@ function ConstraintBlocks(D, d, blocks::ConstraintBlocks)
         off1 += n1+p
         off2 += bm
         Y = view(D, ip, iz)
-        y = view(d, ip)
+        y = view(d, ip[n1+1:end])
         ConstraintBlock(blocks[k].dynamics, blocks[k].cons, blocks[k].type, Y=Y, y=y)
     end
 end

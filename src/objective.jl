@@ -4,6 +4,9 @@
 
 abstract type AbstractObjective end
 Base.length(obj::AbstractObjective) = length(obj.cost)
+state_dim(obj::AbstractObjective) = throw(ErrorException("state_dim not implemented"))
+control_dim(obj::AbstractObjective) = throw(ErrorException("control_dim not implemented"))
+get_J(obj::AbstractObjective) = throw(ErrorException("get_J not implemented"))
 
 """```
 cost(obj::Objective, Z::Traj)::Float64
@@ -36,6 +39,9 @@ struct Objective{C} <: AbstractObjective
     J::Vector{Float64}
 end
 
+state_dim(obj::Objective) = state_dim(obj.cost[1])
+control_dim(obj::Objective) = control_dim(obj.cost[1])
+
 # Constructors
 function Objective(cost::CostFunction,N::Int)
     Objective([cost for k = 1:N], zeros(N))
@@ -67,6 +73,16 @@ Base.iterate(obj::Objective, start=1) = Base.iterate(obj.cost, start)
 
 Base.show(io::IO, obj::Objective{C}) where C = print(io,"Objective")
 
+const QuadraticObjective{C} = Objective{C} where C<:QuadraticCostFunction
+
+QuadraticObjective(obj::Objective) = Objective(QuadraticCostFunction.(obj.cost))
+function QuadraticObjective(obj::AbstractObjective)
+    N = length(get_J(obj))
+    n = state_dim(obj)
+    m = control_dim(obj)
+    Objective([QuadraticCost(n,m) for k = 1:N])
+end
+
 # Convenience constructors
 @doc raw"""```julia
 LQRObjective(Q, R, Qf, xf, N)
@@ -84,7 +100,7 @@ function LQRObjective(Q::AbstractArray, R::AbstractArray, Qf::AbstractArray,
     cf = 0.5*xf'*Qf*xf
 
     ℓ = QuadraticCost(Q, R, H, q, r, c, checks=checks)
-    ℓN = QuadraticCost(Qf, qf, cf, check=checks)
+    ℓN = QuadraticCost(Qf, qf, cf, check=checks, terminal=true)
 
     Objective(ℓ, ℓN, N)
 end
@@ -101,9 +117,9 @@ function LQRObjective(
     qf = -Qf*xf
     cf = 0.5*xf'*Qf*xf
 
-    ℓ = DiagonalCost(Q, R, q, r, c)
+    ℓ = DiagonalCost(Q, R, q, r, c, false)
 
-    ℓN = DiagonalCost(Qf, R, qf, r, cf)
+    ℓN = DiagonalCost(Qf, R, qf, r, cf, true)
 
     Objective(ℓ, ℓN, N)
 end

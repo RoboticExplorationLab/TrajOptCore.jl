@@ -16,22 +16,28 @@ import Base.copy
 
 abstract type CostFunction end
 
+abstract type QuadraticCostFunction <: CostFunction end
+
+@inline QuadraticCostFunction(cost::QuadraticCostFunction) = cost
+@inline QuadraticCostFunction(cost::CostFunction) =
+    QuadraticCost{Float64}(state_dim(cost), control_dim(cost))
 
 #######################################################
 #              COST FUNCTION INTERFACE                #
 #######################################################
 
-struct DiagonalCost{N,M,T} <: CostFunction
+struct DiagonalCost{N,M,T} <: QuadraticCostFunction
     Q::Diagonal{T,SVector{N,T}}
     R::Diagonal{T,SVector{M,T}}
     q::SVector{N,T}
     r::SVector{M,T}
     c::T
+    terminal::Bool
 end
 
 function DiagonalCost(Q::Diagonal{<:Any,SVector{n}},R::Diagonal{<:Any,SVector{m}},
-        q=(@SVector zeros(n)), r=(@SVector zeros(m)), c=0) where {n,m}
-    DiagonalCost(Q,R,q,r,c)
+        q=(@SVector zeros(n)), r=(@SVector zeros(m)), c=0, terminal=false) where {n,m}
+    DiagonalCost(Q,R,q,r,c, terminal)
 end
 
 state_dim(::DiagonalCost{n}) where n = n
@@ -56,6 +62,23 @@ function hessian!(E::AbstractExpansion, cost::DiagonalCost, x, u)
     E.ux .= 0
 end
 
+function gradient!(E::QuadraticCostFunction, cost::DiagonalCost, x, u)
+    E.q .= cost.Q*x .+ cost.q
+    E.r .= cost.R*u .+ cost.r
+    return false
+end
+
+function hessian!(E::QuadraticCostFunction, cost::DiagonalCost, x, u)
+    E.Q .= cost.Q
+    E.R .= cost.R
+    E.H .= cost.H
+    return true
+end
+
+function LinearAlgebra.inv(cost::DiagonalCost)
+    return DiagonalCost(inv(cost.Q), inv(cost.R), cost.q, cost.r, cost.c, cost.terminal)
+end
+
 """
 $(TYPEDEF)
 Cost function of the form
@@ -70,15 +93,16 @@ QuadraticCost(Q, q, c)
 ```
 Any optional or omitted values will be set to zero(s).
 """
-mutable struct QuadraticCost{TQ,TR,TH,Tq,Tr,T} <: CostFunction
+mutable struct QuadraticCost{TQ,TR,TH,Tq,Tr,T} <: QuadraticCostFunction
     Q::TQ                 # Quadratic stage cost for states (n,n)
     R::TR                 # Quadratic stage cost for controls (m,m)
     H::TH                 # Quadratic Cross-coupling for state and controls (n,m)
     q::Tq                 # Linear term on states (n,)
     r::Tr                 # Linear term on controls (m,)
     c::T                                 # constant term
+    terminal::Bool
     function QuadraticCost(Q::TQ, R::TR, H::TH,
-            q::Tq, r::Tr, c::T; checks=true) where {TQ,TR,TH,Tq,Tr,T}
+            q::Tq, r::Tr, c::T; checks=true, terminal=false) where {TQ,TR,TH,Tq,Tr,T}
         @assert size(Q,1) == length(q)
         @assert size(R,1) == length(r)
         @assert size(H) == (length(r), length(q))
@@ -91,7 +115,7 @@ mutable struct QuadraticCost{TQ,TR,TH,Tq,Tr,T} <: CostFunction
                 throw(err)
             end
         end
-        new{TQ,TR,TH,Tq,Tr,T}(Q,R,H,q,r,c)
+        new{TQ,TR,TH,Tq,Tr,T}(Q,R,H,q,r,c,terminal)
     end
 end
 
@@ -100,8 +124,8 @@ control_dim(cost::QuadraticCost) = length(cost.r)
 
 # Constructors
 function QuadraticCost(Q,R; H=similar(Q,size(R,1), size(Q,1)), q=zeros(size(Q,1)),
-        r=zeros(size(R,1)), c=0.0, checks=true)
-    QuadraticCost(Q,R,H,q,r,c, checks=checks)
+        r=zeros(size(R,1)), c=0.0, checks=true, terminal=false)
+    QuadraticCost(Q,R,H,q,r,c, checks=checks, terminal=terminal)
 end
 
 function QuadraticCost(Q::Union{Diagonal{T,SVector{N,T}}, SMatrix{N,N,T}},
@@ -109,12 +133,22 @@ function QuadraticCost(Q::Union{Diagonal{T,SVector{N,T}}, SMatrix{N,N,T}},
             H=(@SMatrix zeros(T,M,N)),
             q=(@SVector zeros(T,N)),
             r=(@SVector zeros(M)),
-            c=0.0, checks=true) where {T,N,M}
-    QuadraticCost(Q,R,H,q,r,c, checks=checks)
+            c=0.0, checks=true, terminal=false) where {T,N,M}
+    QuadraticCost(Q,R,H,q,r,c, checks=checks, terminal=terminal)
 end
 
 function QuadraticCost(Q,q,c; checks=true)
-    QuadraticCost(Q,zeros(0,0),zeros(0,size(Q,1)),q,zeros(0),c,checks=checks)
+    QuadraticCost(Q,zeros(0,0),zeros(0,size(Q,1)),q,zeros(0),c,checks=checks, terminal=true)
+end
+
+function QuadraticCost{T}(n::Int,m::Int) where T
+    Q = SizedMatrix{n,n}(Matrix(one(Float64)*I,n,n))
+    R = SizedMatrix{m,m}(Matrix(one(Float64)*I,m,m))
+    H = SizedMatrix{m,n}(zeros(T,m,m))
+    q = SizedVector{n}(zeros(T,n))
+    r = SizedVector{m}(zeros(T,n))
+    c = zero(T)
+    QuadraticCost(Q,R,H,q,r,c, checks=false, terminal=false)
 end
 
 """
@@ -129,7 +163,7 @@ function LQRCost(Q::AbstractArray, R::AbstractArray,
     q = -Q*xf
     r = -R*uf
     c = 0.5*xf'*Q*xf + 0.5*uf'R*uf
-    return QuadraticCost(Q, R, H, q, r, c, checks=checks)
+    return QuadraticCost(Q, R, H, q, r, c, checks=checks, terminal=false)
 end
 
 function LQRCost(Q::Diagonal{<:Any,SVector{n}},R::Diagonal{<:Any,SVector{m}},
@@ -137,7 +171,7 @@ function LQRCost(Q::Diagonal{<:Any,SVector{n}},R::Diagonal{<:Any,SVector{m}},
     q = -Q*xf
     r = -R*uf
     c = 0.5*xf'*Q*xf + 0.5*uf'R*uf
-    return DiagonalCost(Q, R, H, q, r, c)
+    return DiagonalCost(Q, R, H, q, r, c, false)
 end
 
 """
@@ -149,7 +183,7 @@ Q must be positive semidefinite
 function LQRCostTerminal(Qf::AbstractArray,xf::AbstractVector)
     qf = -Qf*xf
     cf = 0.5*xf'*Qf*xf
-    return QuadraticCost(Qf,zeros(0,0),zeros(0,size(Qf,1)),qf,zeros(0),cf)
+    return QuadraticCost(Qf,zeros(0,0),zeros(0,size(Qf,1)),qf,zeros(0),cf,true)
 end
 
 # Cost function methods
@@ -183,10 +217,29 @@ function hessian!(E::AbstractExpansion, cost::QuadraticCost, x, u)
 end
 
 
-
 # Additional Methods
 function Base.show(io::IO, cost::QuadraticCost)
     print(io, "QuadraticCost{...}")
+end
+
+function LinearAlgebra.inv(cost::QuadraticCost)
+    if norm(cost.H,Inf) ≈ 0
+        QuadraticCost(inv(cost.Q), inv(cost.R), cost.H, cost.q, cost.r, cost.c,
+            checks=false, terminal=cost.terminal)
+    else
+        m,n = size(cost.H)
+        H1 = [cost.Q cost.H']
+        H2 = [cost.H cost.R ]
+        H = [H1; H2]
+        Hinv = inv(H)
+        ix = 1:n
+        iu = n .+ (1:m)
+        Q = SizedMatrix{n,n}(Hinv[ix, ix])
+        R = SizedMatrix{m,m}(Hinv[iu, iu])
+        H = SizedMatrix{m,n}(Hinv[iu, ix])
+        QuadraticCost(Q,R,H, cost.q, cost.r, cost.c,
+            checks=false, terminal=cost.terminal)
+    end
 end
 
 import Base: +

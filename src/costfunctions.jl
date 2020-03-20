@@ -35,8 +35,8 @@ struct DiagonalCost{N,M,T} <: QuadraticCostFunction
     terminal::Bool
 end
 
-function DiagonalCost(Q::Diagonal{<:Any,SVector{n}},R::Diagonal{<:Any,SVector{m}},
-        q=(@SVector zeros(n)), r=(@SVector zeros(m)), c=0, terminal=false) where {n,m}
+function DiagonalCost(Q::Diagonal{T,<:SVector{n}},R::Diagonal{T,<:SVector{m}},
+        q=(@SVector zeros(T,n)), r=(@SVector zeros(T,m)), c=zero(T), terminal=false) where {T,n,m}
     DiagonalCost(Q,R,q,r,c, terminal)
 end
 
@@ -79,6 +79,12 @@ function LinearAlgebra.inv(cost::DiagonalCost)
     return DiagonalCost(inv(cost.Q), inv(cost.R), cost.q, cost.r, cost.c, cost.terminal)
 end
 
+function Base.:\(cost::DiagonalCost, z::AbstractKnotPoint)
+    x = cost.Q\state(z)
+    u = cost.R\control(z)
+    return StaticKnotPoint([x;u], z._x, z._u, z.dt, z.t)
+end
+
 """
 $(TYPEDEF)
 Cost function of the form
@@ -93,19 +99,23 @@ QuadraticCost(Q, q, c)
 ```
 Any optional or omitted values will be set to zero(s).
 """
-mutable struct QuadraticCost{TQ,TR,TH,Tq,Tr,T} <: QuadraticCostFunction
-    Q::TQ                 # Quadratic stage cost for states (n,n)
-    R::TR                 # Quadratic stage cost for controls (m,m)
-    H::TH                 # Quadratic Cross-coupling for state and controls (n,m)
-    q::Tq                 # Linear term on states (n,)
-    r::Tr                 # Linear term on controls (m,)
+mutable struct QuadraticCost{n,m,T,TQ,TR} <: QuadraticCostFunction
+    Q::TQ                     # Quadratic stage cost for states (n,n)
+    R::TR                     # Quadratic stage cost for controls (m,m)
+    H::SizedMatrix{n,m,T,2}                 # Quadratic Cross-coupling for state and controls (n,m)
+    q::SVector{n,T}                 # Linear term on states (n,)
+    r::SVector{m,T}                 # Linear term on controls (m,)
     c::T                                 # constant term
     terminal::Bool
+    zeroH::Bool
+    Qinv::TQ
+    Rinv::TR
+    Sinv::SizedMatrix{n,n,T,2}
     function QuadraticCost(Q::TQ, R::TR, H::TH,
             q::Tq, r::Tr, c::T; checks=true, terminal=false) where {TQ,TR,TH,Tq,Tr,T}
         @assert size(Q,1) == length(q)
         @assert size(R,1) == length(r)
-        @assert size(H) == (length(r), length(q))
+        @assert size(H) == (length(q), length(r))
         if checks
             if !isposdef(Array(R))
                 @warn "R is not positive definite"
@@ -115,7 +125,16 @@ mutable struct QuadraticCost{TQ,TR,TH,Tq,Tr,T} <: QuadraticCostFunction
                 throw(err)
             end
         end
-        new{TQ,TR,TH,Tq,Tr,T}(Q,R,H,q,r,c,terminal)
+        n,m = size(H)
+        Qinv = inv(Q)
+        Rinv = inv(R)
+        zeroH = norm(H,Inf) ≈ 0
+        if zeroH
+            new{n,m,T,TQ,TR}(Q,R,H,q,r,c,terminal,zeroH,Qinv,Rinv)
+        else
+            Sinv = inv(Q - H*Rinv*H')  # store Shur compliment inverse
+            new{n,m,T,TQ,TR}(Q,R,H,q,r,c,terminal,zeroH,Qinv,Rinv,Sinv)
+        end
     end
 end
 
@@ -123,14 +142,14 @@ state_dim(cost::QuadraticCost) = length(cost.q)
 control_dim(cost::QuadraticCost) = length(cost.r)
 
 # Constructors
-function QuadraticCost(Q,R; H=similar(Q,size(R,1), size(Q,1)), q=zeros(size(Q,1)),
+function QuadraticCost(Q,R; H=similar(Q,size(Q,1), size(R,1))*0, q=zeros(size(Q,1)),
         r=zeros(size(R,1)), c=0.0, checks=true, terminal=false)
     QuadraticCost(Q,R,H,q,r,c, checks=checks, terminal=terminal)
 end
 
 function QuadraticCost(Q::Union{Diagonal{T,SVector{N,T}}, SMatrix{N,N,T}},
             R::Union{Diagonal{T,SVector{M,T}}, SMatrix{M,M,T}};
-            H=(@SMatrix zeros(T,M,N)),
+            H=SizedMatrix{N,M}(zeros(T,N,M)),
             q=(@SVector zeros(T,N)),
             r=(@SVector zeros(M)),
             c=0.0, checks=true, terminal=false) where {T,N,M}
@@ -216,11 +235,10 @@ function hessian!(E::AbstractExpansion, cost::QuadraticCost, x, u)
     return nothing
 end
 
-
 # Additional Methods
-function Base.show(io::IO, cost::QuadraticCost)
-    print(io, "QuadraticCost{...}")
-end
+# function Base.show(io::IO, cost::QuadraticCost)
+#     print(io, "QuadraticCost{...}")
+# end
 
 function LinearAlgebra.inv(cost::QuadraticCost)
     if norm(cost.H,Inf) ≈ 0
@@ -240,6 +258,29 @@ function LinearAlgebra.inv(cost::QuadraticCost)
         QuadraticCost(Q,R,H, cost.q, cost.r, cost.c,
             checks=false, terminal=cost.terminal)
     end
+end
+
+raw"""
+Solve the system
+``\begin{bmatrix} Q & H \\ H^T R \end{bmatrix} \begin{bmatrix} x \\ u \end{bmatrix}
+    = \begin{bmatrix} c \\ d \end{bmatrix}``
+Efficient and non-allocating since the cost stores the required matrix inverses, and uses
+the Shur compliment in the case H is non-zero.
+
+Returns a `StaticKnotPoint` with the solution
+"""
+function Base.:\(cost::QuadraticCost, z::AbstractKnotPoint)
+    Qinv,Rinv,H = cost.Qinv, cost.Rinv, cost.H
+    c = state(z)
+    d = control(z)
+    if cost.zeroH
+        x = Qinv*c
+        u = Rinv*d
+    else
+        x = cost.Sinv*(c - H*(Rinv*d))
+        u = Rinv*(d - H'x)
+    end
+    return StaticKnotPoint([x;u], z._x, z._u, z.dt, z.t)
 end
 
 import Base: +

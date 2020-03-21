@@ -36,6 +36,7 @@ export
     AbstractObjective,
     Objective,
     LQRObjective,
+	QuadraticObjective,
 	CostFunction,
     QuadraticCost,
 	DiagonalCost,

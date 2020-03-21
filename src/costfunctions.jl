@@ -26,11 +26,11 @@ abstract type QuadraticCostFunction <: CostFunction end
 #              COST FUNCTION INTERFACE                #
 #######################################################
 
-struct DiagonalCost{N,M,T} <: QuadraticCostFunction
-    Q::Diagonal{T,SVector{N,T}}
-    R::Diagonal{T,SVector{M,T}}
-    q::SVector{N,T}
-    r::SVector{M,T}
+struct DiagonalCost{n,m,T} <: QuadraticCostFunction
+    Q::Diagonal{T,SVector{n,T}}
+    R::Diagonal{T,SVector{m,T}}
+    q::SVector{n,T}
+    r::SVector{m,T}
     c::T
     terminal::Bool
 end
@@ -108,9 +108,10 @@ mutable struct QuadraticCost{n,m,T,TQ,TR} <: QuadraticCostFunction
     c::T                                 # constant term
     terminal::Bool
     zeroH::Bool
-    Qinv::TQ
-    Rinv::TR
-    Sinv::SizedMatrix{n,n,T,2}
+    # Qinv::TQ
+    # Rinv::TR
+    # Sinv::SizedMatrix{n,n,T,2}
+    # Jinv::SizedMatrix{nm,nm,T,2}
     function QuadraticCost(Q::TQ, R::TR, H::TH,
             q::Tq, r::Tr, c::T; checks=true, terminal=false) where {TQ,TR,TH,Tq,Tr,T}
         @assert size(Q,1) == length(q)
@@ -125,16 +126,16 @@ mutable struct QuadraticCost{n,m,T,TQ,TR} <: QuadraticCostFunction
                 throw(err)
             end
         end
-        n,m = size(H)
-        Qinv = inv(Q)
-        Rinv = inv(R)
         zeroH = norm(H,Inf) ≈ 0
-        if zeroH
-            new{n,m,T,TQ,TR}(Q,R,H,q,r,c,terminal,zeroH,Qinv,Rinv)
-        else
-            Sinv = inv(Q - H*Rinv*H')  # store Shur compliment inverse
-            new{n,m,T,TQ,TR}(Q,R,H,q,r,c,terminal,zeroH,Qinv,Rinv,Sinv)
-        end
+        new{n,m,T,TQ,TR}(Q,R,H,q,r,c,terminal,zeroH)
+        # Qinv = inv(Q)
+        # Rinv = inv(R)
+        # if zeroH
+        #     new{n,m,T,TQ,TR}(Q,R,H,q,r,c,terminal,zeroH,Qinv,Rinv)
+        # else
+        #     Sinv = inv(Q - H*Rinv*H')  # store Shur compliment inverse
+        #     new{n,m,T,TQ,TR}(Q,R,H,q,r,c,terminal,zeroH,Qinv,Rinv,Sinv)
+        # end
     end
 end
 

@@ -13,7 +13,8 @@ struct ConstraintBlock{T,VT,VV,MT,MV,D}
     y::VT
     Y::MT
     YYt::Matrix{T}  # outer product => Shur compliment
-    YJ::Matrix{T}   # partial Shur compliment
+    JYt::Matrix{T}   # partial Shur compliment
+    YJ::Transpose{T,Matrix{T}}
     r::Vector{T}    # Shur compliment residual
     r_::Vector{SubArray{T,1,Vector{T},Tuple{UnitRange{Int}},true}}
 
@@ -55,8 +56,11 @@ function ConstraintBlock(dyn::DynamicsConstraint{<:Any,<:Any,T},
     if isempty(y)
         y = zeros(T, sum(p) + n2)
     end
+
+    # Shur compliment pieces
     YYt = zeros(T, bn,bn)
-    YJ = zeros(T, bn,bm)
+    JYt = zeros(T, bm, bn)
+    YJ = transpose(JYt)
     r = zeros(T, bn)
     r_ = [view(r,1:n1), view(r,n1 .+ (1:sum(p))), view(r, (n1 + sum(p)) .+ (1:n2))]
 
@@ -74,7 +78,7 @@ function ConstraintBlock(dyn::DynamicsConstraint{<:Any,<:Any,T},
     C = view(Y, n1 .+ (1:sum(p)), 1:n+m)
     d = view(y, sum(p) .+ (1:n2))
     D1 = view(Y, (sum(p) + n1) .+ (1:n2), 1:n+m)
-    ConstraintBlock(cons,dyn,y,Y,YYt,YJ,r,r_, D2, c,C, c_,C_, d,D1, type)
+    ConstraintBlock(cons,dyn,y,Y,YYt,JYt,YJ,r,r_, D2, c,C, c_,C_, d,D1, type)
 end
 
 Base.size(block::ConstraintBlock) = size(block.Y)

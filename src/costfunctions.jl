@@ -1,4 +1,4 @@
-import Base.copy
+import Base: copy, +
 
 # export
 #     CostFunction,
@@ -85,6 +85,14 @@ function Base.:\(cost::DiagonalCost, z::AbstractKnotPoint)
     return StaticKnotPoint([x;u], z._x, z._u, z.dt, z.t)
 end
 
+function Base.:+(cost1::DiagonalCost, cost2::DiagonalCost)
+    @assert state_dim(cost1) == state_dim(cost2)
+    @assert control_dim(cost1) == control_dim(cost2)
+    terminal = cost1.terminal || cost2.terminal
+    DiagonalCost(cost1.Q + cost2.Q, cost1.R + cost2.R, cost1.q + cost2.q, cost1.r + cost2.r,
+        cost1.c + cost2.c, terminal)
+end
+
 """
 $(TYPEDEF)
 Cost function of the form
@@ -102,10 +110,10 @@ Any optional or omitted values will be set to zero(s).
 mutable struct QuadraticCost{n,m,T,TQ,TR} <: QuadraticCostFunction
     Q::TQ                     # Quadratic stage cost for states (n,n)
     R::TR                     # Quadratic stage cost for controls (m,m)
-    H::SizedMatrix{n,m,T,2}                 # Quadratic Cross-coupling for state and controls (n,m)
-    q::SVector{n,T}                 # Linear term on states (n,)
-    r::SVector{m,T}                 # Linear term on controls (m,)
-    c::T                                 # constant term
+    H::SizedMatrix{m,n,T,2}   # Quadratic Cross-coupling for state and controls (m,n)
+    q::SVector{n,T}           # Linear term on states (n,)
+    r::SVector{m,T}           # Linear term on controls (m,)
+    c::T                      # constant term
     terminal::Bool
     zeroH::Bool
     # Qinv::TQ
@@ -116,7 +124,7 @@ mutable struct QuadraticCost{n,m,T,TQ,TR} <: QuadraticCostFunction
             q::Tq, r::Tr, c::T; checks=true, terminal=false) where {TQ,TR,TH,Tq,Tr,T}
         @assert size(Q,1) == length(q)
         @assert size(R,1) == length(r)
-        @assert size(H) == (length(q), length(r))
+        @assert size(H) == (length(r), length(q))
         if checks
             if !isposdef(Array(R))
                 @warn "R is not positive definite"
@@ -127,6 +135,7 @@ mutable struct QuadraticCost{n,m,T,TQ,TR} <: QuadraticCostFunction
             end
         end
         zeroH = norm(H,Inf) ≈ 0
+        m,n = size(H)
         new{n,m,T,TQ,TR}(Q,R,H,q,r,c,terminal,zeroH)
         # Qinv = inv(Q)
         # Rinv = inv(R)
@@ -164,7 +173,7 @@ end
 function QuadraticCost{T}(n::Int,m::Int) where T
     Q = SizedMatrix{n,n}(Matrix(one(Float64)*I,n,n))
     R = SizedMatrix{m,m}(Matrix(one(Float64)*I,m,m))
-    H = SizedMatrix{m,n}(zeros(T,m,m))
+    H = SizedMatrix{m,n}(zeros(T,m,n))
     q = SizedVector{n}(zeros(T,n))
     r = SizedVector{m}(zeros(T,n))
     c = zero(T)
@@ -208,15 +217,15 @@ end
 
 # Cost function methods
 function stage_cost(cost::QuadraticCost, x::AbstractVector, u::AbstractVector)
-    0.5*x'cost.Q*x + 0.5*u'*cost.R*u + cost.q'x + cost.r'u + cost.c #+ u'*cost.H*x
+    0.5*x'cost.Q*x .+ 0.5*u'*cost.R*u .+ cost.q'x .+ cost.r'u .+ cost.c .+ u'*cost.H*x
 end
 
 function stage_cost(cost::QuadraticCost, xN::AbstractVector{T}) where T
-    0.5*xN'cost.Q*xN + cost.q'*xN + cost.c
+    0.5*xN'cost.Q*xN .+ cost.q'*xN .+ cost.c
 end
 
 function gradient!(E::AbstractExpansion, cost::QuadraticCost, x, u)
-    E.x .= cost.Q*x + cost.q + cost.H'*u
+    E.x .= cost.Q*x + cost.q + cost.H'u
     E.u .= cost.R*u + cost.r + cost.H*x
     return nothing
     mul!(E.x, cost.Q, x)
@@ -284,7 +293,6 @@ function Base.:\(cost::QuadraticCost, z::AbstractKnotPoint)
     return StaticKnotPoint([x;u], z._x, z._u, z.dt, z.t)
 end
 
-import Base: +
 "Add two Quadratic costs of the same size"
 function +(c1::QuadraticCost, c2::QuadraticCost)
     @assert state_dim(c1) == state_dim(c2)
@@ -292,6 +300,14 @@ function +(c1::QuadraticCost, c2::QuadraticCost)
     QuadraticCost(c1.Q + c2.Q, c1.R + c2.R, c1.H + c2.H,
                   c1.q + c2.q, c1.r + c2.r, c1.c + c2.c)
 end
+
+function +(c1::DiagonalCost, c2::QuadraticCost)
+    @assert state_dim(c1) == state_dim(c2)
+    @assert control_dim(c1) == control_dim(c2)
+    QuadraticCost(c1.Q + c2.Q, c1.R + c2.R, c2.H,
+                  c1.q + c2.q, c1.r + c2.r, c1.c + c2.c)
+end
+@inline +(c1::QuadraticCost, c2::DiagonalCost) = c2+c1
 
 function copy(cost::QuadraticCost)
     return QuadraticCost(copy(cost.Q), copy(cost.R), copy(cost.H), copy(cost.q), copy(cost.r), copy(cost.c))
@@ -793,5 +809,26 @@ function change_dimension(cost::QuadraticCost, n, m)
     H = [H; H2]
     q = [cost.q; q_]
     r = [cost.r; r_]
-    QuadraticCost(Q,R,H,q,r,c,checks=false)
+    QuadraticCost(Q,R,H,q,r,c,checks=false, terminal=cost.terminal)
+end
+
+function change_dimension(cost::DiagonalCost, n::Int, m::Int)
+    n0,m0 = state_dim(cost), control_dim(cost)
+    @assert n >= n0
+    @assert m >= m0
+
+    Qd_ = @SVector zeros(n-n0)
+    Rd_ = @SVector zeros(m-m0)
+    q_ = @SVector zeros(n-n0)
+    r_ = @SVector zeros(m-m0)
+    c = cost.c
+
+    Qd = cost.Q.diag
+    Rd = cost.R.diag
+
+    Q = Diagonal([Qd; Qd_])
+    R = Diagonal([Rd; Rd_])
+    q = [cost.q; q_]
+    r = [cost.r; r_]
+    DiagonalCost(Q, R, q, r, c, cost.terminal)
 end

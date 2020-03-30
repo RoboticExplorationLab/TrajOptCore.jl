@@ -37,6 +37,15 @@ Objective(costs::Vector{<:CostFunction})
 struct Objective{C} <: AbstractObjective
     cost::Vector{C}
     J::Vector{Float64}
+    const_grad::Vector{Bool}
+    const_hess::Vector{Bool}
+    function Objective(cost::Vector{C}) where C <: CostFunction
+        N = length(cost)
+        J = zeros(N)
+        grad = zeros(Bool,N)
+        hess = zeros(Bool,N)
+        new{C}(cost, J, grad, hess)
+    end
 end
 
 state_dim(obj::Objective) = state_dim(obj.cost[1])
@@ -44,21 +53,16 @@ control_dim(obj::Objective) = control_dim(obj.cost[1])
 
 # Constructors
 function Objective(cost::CostFunction,N::Int)
-    Objective([cost for k = 1:N], zeros(N))
+    Objective([cost for k = 1:N])
 end
 
 function Objective(cost::CostFunction,cost_terminal::CostFunction,N::Int)
-    Objective([k < N ? cost : cost_terminal for k = 1:N], zeros(N))
+    Objective([k < N ? cost : cost_terminal for k = 1:N])
 end
 
 function Objective(cost::Vector{<:CostFunction},cost_terminal::CostFunction)
     N = length(cost) + 1
-    Objective([cost...,cost_terminal], zeros(N))
-end
-
-function Objective(cost::Vector{<:CostFunction})
-    N = length(cost)
-    Objective(cost, zeros(N))
+    Objective([cost...,cost_terminal])
 end
 
 # Methods
@@ -81,6 +85,30 @@ function QuadraticObjective(obj::AbstractObjective)
     n = state_dim(obj)
     m = control_dim(obj)
     Objective([QuadraticCost(n,m) for k = 1:N])
+end
+
+function QuadraticObjective(n::Int, m::Int, N::Int)
+    costfun = QuadraticCost{Float64}(n,m)
+    Objective([copy(costfun) for k = 1:N])
+end
+
+function QuadraticObjective(obj::QuadraticObjective, model::AbstractModel)
+    return obj
+end
+
+function QuadraticObjective(obj::QuadraticObjective, model::RigidBody)
+    @assert length(obj[1].q) == RobotDynamics.state_diff_size(model)
+    n,m = size(model)
+    costfuns = map(obj.cost) do costfun
+        Q = SizedMatrix{n,n}(zeros(n,n))
+        R = costfun.R
+        H = SizedMatrix{m,n}(zeros(m,n))
+        q = @MVector zeros(n)
+        r = costfun.r
+        c = costfun.c
+        QuadraticCost(Q,R,H,q,r,c, checks=false, terminal=costfun.terminal)
+    end
+    Objective(costfuns)
 end
 
 # Convenience constructors

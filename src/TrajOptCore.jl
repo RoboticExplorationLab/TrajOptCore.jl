@@ -112,7 +112,7 @@ include("dynamics_constraints.jl")
 include("integration.jl")
 
 include("cost.jl")
-include("error_expansion.jl")
+include("convals.jl")
 # include("constraint_vals.jl")
 # include("constraint_sets.jl")
 # include("constraint_block.jl")

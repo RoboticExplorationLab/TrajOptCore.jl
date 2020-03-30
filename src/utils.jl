@@ -7,3 +7,11 @@ function ispossemidef(A)
 		return true
 	end
 end
+
+struct NotImplemented <: Exception
+	fun::Symbol
+	type::Symbol
+end
+
+Base.showerror(io::IO, ex::NotImplemented) =
+	print(io, "Not Implemented Error: ", ex.fun, " not implemented for type ", ex.type)

@@ -1,9 +1,14 @@
+using TrajOptCore
 using StaticArrays
 using RobotDynamics
 using BenchmarkTools
 using LinearAlgebra
 using ForwardDiff
 using UnsafeArrays
+using RobotZoo
+using Test
+
+import TrajOptCore: gen_jacobian, ConVal, ALConstraintSet
 
 n,m = 13,4
 x = @SVector rand(n)
@@ -53,7 +58,7 @@ jacobian!(∇c, con, z)
 sum(∇c[:,3:end]) ≈ 0
 
 ∇c ≈ ForwardDiff.jacobian(x->evaluate(con,x), x)
-@btime ForwardDiff.jacobian(x->evaluate($con,x), $x)
+# @btime ForwardDiff.jacobian(x->evaluate($con,x), $x)
 
 
 # Sphere Constraint
@@ -145,3 +150,103 @@ add_constraint!(cons, goal, N, 1)
 cons[1] === goal
 cons.inds[1] == N:N
 length(cons) == 3
+
+
+# ConVals
+model = RobotZoo.Quadrotor()
+n,m = size(model)
+n̄ = RobotDynamics.state_diff_size(model)
+dt = 0.1
+Z = [KnotPoint(rand(model)..., dt) for k = 1:N]
+G = [RobotDynamics.state_diff_jacobian(model, state(z)) for z in Z]
+G = SizedMatrix{n,n̄}.(G)
+
+inds = 1:N-1
+C,c = TrajOptCore.gen_convals(n,m, bnd, inds)
+cval = TrajOptCore.ConVal(n,m,bnd,inds,C,c)
+evaluate!(cval, Z)
+jacobian!(cval, Z)
+max_violation(cval)
+
+# @btime evaluate!($cval, $Z)
+# @btime jacobian!($cval, $Z)
+# @btime max_violation($cval)
+
+# Error expansion
+C,c = TrajOptCore.gen_convals(n̄, m, bnd, inds)
+size(C[1],2) == (n̄+m)
+errval = ConVal(n̄,m,bnd,inds,C,c,true)
+evaluate!(errval, Z)
+@test_throws ErrorException jacobian!(errval, Z)
+
+# Create linked cval
+conval = ConVal(n, m, errval)
+evaluate!(conval, Z)
+jacobian!(conval, Z)
+@test conval.vals === errval.vals
+@test conval.vals[1] === errval.vals[1]
+@test conval.jac[1] !== errval.jac[1]
+
+error_expansion!(errval, conval, model, G)
+@test all([errval.jac[i] ≈ [conval.∇x[1]*G[i] conval.∇u[i]] for i = length(inds)])
+
+# Test a non-RigidBody model
+model = RobotZoo.Cartpole()
+n,m = size(model)
+n̄ = RobotDynamics.state_diff_size(model)
+Z = [KnotPoint(rand(model)..., dt) for k = 1:N]
+G = [RobotDynamics.state_diff_jacobian(model, state(z)) for z in Z]
+G = SizedMatrix{n,n̄}.(G)
+
+bnd = BoundConstraint(n, m, u_min=-3, u_max=3, x_max=[Inf,0.5,Inf,Inf], x_min=[-Inf,-0.5,-Inf,-Inf])
+C,c = TrajOptCore.gen_convals(n̄, m, bnd, inds)
+size(C[1],2) == (n̄+m)
+errval = ConVal(n̄,m,bnd,inds,C,c, model isa RigidBody)
+evaluate!(errval, Z)
+jacobian!(errval, Z)
+
+conval = ConVal(n, m, errval)
+evaluate!(conval, Z)
+jacobian!(conval, Z)
+@test conval.vals === errval.vals
+@test conval.vals[1] === errval.vals[1]
+@test conval.jac[1] === errval.jac[1]
+@test conval === errval
+
+error_expansion!(errval, conval, model, G)
+
+
+# AL ConSet
+model = RobotZoo.Quadrotor()
+n,m = size(model)
+n̄ = RobotDynamics.state_diff_size(model)
+dt = 0.1
+Z = [KnotPoint(rand(model)..., dt) for k = 1:N]
+G = [RobotDynamics.state_diff_jacobian(model, state(z)) for z in Z]
+G = SizedMatrix{n,n̄}.(G)
+
+import TrajOptCore: ALConstraintSet, reset!
+conSet = ALConstraintSet(cons, model)
+conSet.convals
+evaluate!(conSet, Z)
+jacobian!(conSet, Z)
+max_violation(conSet)
+TrajOptCore.max_penalty!(conSet)
+reset!(conSet)
+TrajOptCore.dual_update!(conSet)
+
+J = zeros(N)
+TrajOptCore.cost!(J, conSet)
+sum(J)
+
+maximum.(conSet.μ[1])
+@btime evaluate!($conSet, $Z)
+@btime jacobian!($conSet, $Z)
+@btime max_violation($conSet)
+@btime TrajOptCore.max_penalty!($conSet)
+@btime reset!($conSet)
+λ_max = 1e8
+con_params = TrajOptCore.ConstraintParams()
+@btime TrajOptCore.dual_update!($conSet)
+@btime TrajOptCore.penalty_update!($conSet)
+@btime TrajOptCore.cost!($J, $conSet)

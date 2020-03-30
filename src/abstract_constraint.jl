@@ -111,12 +111,12 @@ width(::CoupledConstraint,n,m) = 2n + 2m
 width(::CoupledStateConstraint,n,m) = 2n
 width(::CoupledControlConstraint,n,m) = 2m
 
-widths(con::StageConstraint) = (state_dim(con) + control_dim(con),)
-widths(con::StateConstraint) = (state_dim(con),)
-widths(con::ControlConstraint) = (control_dim(con),)
-widths(con::CoupledConstraint) = (state_dim(con) + control_dim(con), state_dim(con) + control_dim(con))
-widths(con::CoupledStateConstraint) = (state_dim(con), state_dim(con))
-widths(con::CoupledControlConstraint) = (control_dim(con), control_dim(con))
+widths(con::StageConstraint, n=state_dim(con), m=control_dim(con)) = (n+m,)
+widths(con::StateConstraint, n=state_dim(con), m=0) = (n,)
+widths(con::ControlConstraint, n=0, m=control_dim(con)) = (m,)
+widths(con::CoupledConstraint, n=state_dim(con), m=control_dim(con)) = (n+m, n+m)
+widths(con::CoupledStateConstraint, n=state_dim(con), m=0) = (n,n)
+widths(con::CoupledControlConstraint, n=0, m=control_dim(con)) = (m,m)
 
 "Upper bound of the constraint, as a vector, which is 0 for all constraints
 (except bound constraints)"
@@ -213,19 +213,32 @@ end
 	jacobian!(∇c, con, state(z), control(z))
 
 # ForwardDiff jacobians that are of only state or control
-function jacobian!(∇c, con::Union{StageConstraint,ControlConstraint}, x::StaticVector)
+function jacobian!(∇c, con::StageConstraint, x::StaticVector)
 	eval_c(x) = evaluate(con, x)
 	∇c .= ForwardDiff.jacobian(eval_c, x)
 	return false
 end
 
-function jacobian!(∇c, con::StageConstraint, z::AbstractKnotPoint)
+function jacobian!(∇c, con::StageConstraint, x::StaticVector, u::StaticVector)
 	eval_c(x) = evaluate(con, StaticKnotPoint(z, x))
-	∇c .= ForwardDiff.jacobian(eval_c, z.z)
+	∇c .= ForwardDiff.jacobian(eval_c, [x; u])
 	return false
 end
 
 @inline gen_jacobian(con::AbstractConstraint) = SizedMatrix{size(con)...}(zeros(size(con)))
+
+function gen_views(∇c::AbstractMatrix, con::StateConstraint, n=state_dim(con), m=0)
+	view(∇c,:,1:n), view(∇c,:,n:n-1)
+end
+
+function gen_views(∇c::AbstractMatrix, con::ControlConstraint, n=0, m=control_dim(con))
+	view(∇c,:,1:0), view(∇c,:,1:m)
+end
+
+function gen_views(∇c::AbstractMatrix, con::AbstractConstraint, n=state_dim(con), m=control_dim(con))
+	view(∇c,:,1:n), view(∇c,:,n .+ (1:m))
+end
+
 
 ############################################################################################
 #					             CONSTRAINT LIST										   #

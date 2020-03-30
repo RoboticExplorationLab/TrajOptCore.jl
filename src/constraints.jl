@@ -388,7 +388,6 @@ function BoundConstraint(n, m; x_max=Inf*(@SVector ones(n)), x_min=-Inf*(@SVecto
 	carts_u = [CartesianIndex(i,   j) for (i,j) in enumerate(a_max)]
 	carts_l = [CartesianIndex(i+u, j) for (i,j) in enumerate(a_min)]
 	∇c = zeros(u+l, n+m)
-	@show size(∇c)
 	linds_u = LinearIndices(zeros(u+l,n+m))[carts_u]
 	linds_l = LinearIndices(zeros(u+l,n+m))[carts_l]
 

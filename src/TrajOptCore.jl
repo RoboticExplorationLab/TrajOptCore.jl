@@ -1,7 +1,7 @@
 module TrajOptCore
 
 using RobotDynamics
-using DifferentialRotations
+# using Rotations
 using StaticArrays
 using LinearAlgebra
 using DocStringExtensions
@@ -91,14 +91,14 @@ export
 	SphereConstraint,
 	NormConstraint,
 	LinearConstraint,
-	VariableBoundConstraint,
-	QuatNormConstraint,
-	QuatSlackConstraint
+	CollisionConstraint,
+	IndexedConstraint
 
 # constraint sets
 export
     ConstraintSet,
-	ConstraintVals,
+	# ConstraintVals,
+	ConstraintList,
     add_constraint!,
 	num_constraints
 
@@ -112,9 +112,10 @@ include("dynamics_constraints.jl")
 include("integration.jl")
 
 include("cost.jl")
-include("constraint_vals.jl")
-include("constraint_sets.jl")
-include("constraint_block.jl")
+include("error_expansion.jl")
+# include("constraint_vals.jl")
+# include("constraint_sets.jl")
+# include("constraint_block.jl")
 include("problem.jl")
 
 include("utils.jl")

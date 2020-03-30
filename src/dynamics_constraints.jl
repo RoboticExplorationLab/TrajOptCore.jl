@@ -7,7 +7,8 @@
 ############################################################################################
 
 
-abstract type AbstractDynamicsConstraint{W<:Coupled,P} <: AbstractConstraint{Equality,W,P} end
+abstract type AbstractDynamicsConstraint <: CoupledConstraint end
+sense(::AbstractDynamicsConstraint) = Equality()
 state_dim(con::AbstractDynamicsConstraint) = size(con.model)[1]
 control_dim(con::AbstractDynamicsConstraint) = size(con.model)[2]
 Base.length(con::AbstractDynamicsConstraint) = size(con.model)[1]
@@ -25,7 +26,7 @@ DynamicsConstraint{Q}(model::AbstractModel, N)
 ```
 where `N` is the number of knot points and `Q<:QuadratureRule` is the integration method.
 """
-struct DynamicsConstraint{Q<:QuadratureRule,L<:AbstractModel,T,N,M,NM} <: AbstractDynamicsConstraint{Coupled,N}
+struct DynamicsConstraint{Q<:QuadratureRule,L<:AbstractModel,N,M,NM,T} <: AbstractDynamicsConstraint
 	model::L
     fVal::Vector{SVector{N,T}}
     xMid::Vector{SVector{N,T}}

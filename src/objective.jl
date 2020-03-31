@@ -69,15 +69,20 @@ end
 "Get the vector of costs at each knot point. `sum(get_J(obj))` is equal to the cost"
 get_J(obj::Objective) = obj.J
 
-Base.copy(obj::Objective) = Objective(copy(obj.cost), copy(obj.J))
+Base.copy(obj::Objective) = Objective(copy(obj.cost))
 
 Base.getindex(obj::Objective,i::Int) = obj.cost[i]
 
-Base.iterate(obj::Objective, start=1) = Base.iterate(obj.cost, start)
+@inline Base.firstindex(obj::Objective) = firstindex(obj.cost)
+@inline Base.lastindex(obj::Objective) = lastindex(obj.cost)
+@inline Base.iterate(obj::Objective, start=1) = Base.iterate(obj.cost, start)
+@inline Base.eltype(obj::Objective) = eltype(obj.cost)
+@inline Base.length(obj::Objective) = length(obj.cost)
+Base.IteratorSize(obj::Objective) = Base.HasLength()
 
 Base.show(io::IO, obj::Objective{C}) where C = print(io,"Objective")
 
-const QuadraticObjective{C} = Objective{C} where C<:QuadraticCostFunction
+const QuadraticObjective{n,m,T} = Objective{QuadraticCost{n,m,T,SizedMatrix{n,n,T,2},SizedMatrix{m,m,T,2}}}
 
 QuadraticObjective(obj::Objective) = Objective(QuadraticCostFunction.(obj.cost))
 function QuadraticObjective(obj::AbstractObjective)
@@ -93,10 +98,13 @@ function QuadraticObjective(n::Int, m::Int, N::Int)
 end
 
 function QuadraticObjective(obj::QuadraticObjective, model::AbstractModel)
+    # Create QuadraticObjective linked to error cost expansion
+    @assert RobotDynamics.state_diff_size(model) == size(model)[1]
     return obj
 end
 
-function QuadraticObjective(obj::QuadraticObjective, model::RigidBody)
+function QuadraticObjective(obj::QuadraticObjective, model::LieGroupModel)
+    # Create QuadraticObjective partially linked to error cost expansion
     @assert length(obj[1].q) == RobotDynamics.state_diff_size(model)
     n,m = size(model)
     costfuns = map(obj.cost) do costfun

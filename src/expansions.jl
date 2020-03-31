@@ -94,20 +94,3 @@ struct Expansion{T,N0,N,M} <: AbstractExpansion{T}
 		new{T,N,N,M}(x,xx,u,uu,ux)
 	end
 end
-
-struct StaticExpansion{T,N,M,NN,MM,NM} <: AbstractExpansion{T}
-	x::SVector{N,T}
-	xx::SMatrix{N,N,T,NN}
-	u::SVector{M,T}
-	uu::SMatrix{M,M,T,MM}
-	ux::SMatrix{M,N,T,NM}
-end
-
-function StaticExpansion(E::AbstractExpansion)
-	StaticExpansion(SVector(E.x), SMatrix(E.xx),
-		SVector(E.u), SMatrix(E.uu), SMatrix(E.ux))
-end
-
-function StaticExpansion(x,xx,u,uu,ux)
-	StaticExpansion(SVector(x), SMatrix(xx), SVector(u), SMatrix(uu), SMatrix(ux))
-end

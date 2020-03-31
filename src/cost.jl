@@ -23,11 +23,6 @@ cost(obj, dyn_con::DynamicsConstraint{Q}, Z) where Q<:QuadratureRule = cost(obj,
     map!(stage_cost, obj.J, obj.cost, Z)
 end
 
-function cost_expansion!(E::QuadraticCost, cost::CostFunction, z::AbstractKnotPoint)
-    gradient!(E, cost, state(z), control(z))
-    hessian!(E, cost, state(z), control(z))
-end
-
 
 ############################################################################################
 #                              COST EXPANSIONS                                             #
@@ -62,6 +57,12 @@ function cost_hessian!(E::Objective, obj::Objective, Z::Traj, init::Bool=false)
     end
 end
 
+function cost_expansion!(E::Objective, obj::Objective, Z::Traj, init::Bool=false)
+    cost_gradient!(E, obj, Z, init)
+    cost_hessian!(E, obj, Z, init)
+    return nothing
+end
+
 function error_expansion!(E::Objective, Jexp::Objective, model::AbstractModel, Z::Traj, G, tmp=G[end])
     @assert E === Jexp "E and Jexp should be the same object for AbstractModel"
     return nothing
@@ -88,6 +89,27 @@ function error_expansion!(E::QuadraticCost, cost::QuadraticCost, model, z::Abstr
         mul!(E.Q, Transpose(G), tmp, 1.0, 1.0)
     end
     return nothing
+end
+
+struct StaticExpansion{T,N,M,NN,MM,NM} <: AbstractExpansion{T}
+	x::SVector{N,T}
+	xx::SMatrix{N,N,T,NN}
+	u::SVector{M,T}
+	uu::SMatrix{M,M,T,MM}
+	ux::SMatrix{M,N,T,NM}
+end
+
+function StaticExpansion(E::AbstractExpansion)
+	StaticExpansion(SVector(E.x), SMatrix(E.xx),
+		SVector(E.u), SMatrix(E.uu), SMatrix(E.ux))
+end
+
+function StaticExpansion(x,xx,u,uu,ux)
+	StaticExpansion(SVector(x), SMatrix(xx), SVector(u), SMatrix(uu), SMatrix(ux))
+end
+
+function static_expansion(cost::QuadraticCost)
+	StaticExpansion(cost.q, cost.Q, cost.r, cost.R, cost.H)
 end
 
 # # In-place cost-expansion

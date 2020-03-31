@@ -234,10 +234,39 @@ max_violation(conSet)
 TrajOptCore.max_penalty!(conSet)
 reset!(conSet)
 TrajOptCore.dual_update!(conSet)
+tol = Val(1e-6)
+update_active_set!(conSet,tol)
+
+# Error Expansion
+i = 2
+error_expansion!(conSet, model, G)
+@test conSet.errvals[i].jac[1] ≈ [conSet.convals[i].∇x[1]*G[1] conSet.convals[i].∇u[1]]
+
+# Cost expansion
+conSet = ALConstraintSet(cons, model)
+evaluate!(conSet, Z)
+jacobian!(conSet, Z)
+error_expansion!(conSet, model, G)
+E = QuadraticObjective(n̄,m,N)
+foreach(E) do cost
+    cost.Q .*= 0
+    cost.R .*= 0
+end
+cost_expansion!(E, conSet.errvals[i], conSet.λ[i], conSet.μ[i], conSet.active[i])
+cx = conSet.errvals[i].∇x[1]
+cu = conSet.errvals[i].∇u[1]
+Iμ = Diagonal(conSet.active[i][1] .* conSet.μ[i][1])
+@test E[1].Q ≈ cx'Iμ*cx
+@test E[1].R ≈ cu'Iμ*cu
+
+foreach(E) do cost
+    cost.Q .*= 0
+    cost.R .*= 0
+end
+cost_expansion!(E, conSet)
 
 J = zeros(N)
 TrajOptCore.cost!(J, conSet)
-sum(J)
 
 maximum.(conSet.μ[1])
 @btime evaluate!($conSet, $Z)
@@ -250,3 +279,5 @@ con_params = TrajOptCore.ConstraintParams()
 @btime TrajOptCore.dual_update!($conSet)
 @btime TrajOptCore.penalty_update!($conSet)
 @btime TrajOptCore.cost!($J, $conSet)
+@btime update_active_set!($conSet, $tol)
+@btime cost_expansion!($E, $conSet)

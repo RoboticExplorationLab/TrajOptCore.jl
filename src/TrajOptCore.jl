@@ -97,6 +97,7 @@ export
 # constraint sets
 export
     ConstraintSet,
+	ALConstraintSet,
 	# ConstraintVals,
 	ConstraintList,
     add_constraint!,
@@ -113,6 +114,7 @@ include("integration.jl")
 
 include("cost.jl")
 include("convals.jl")
+include("conset.jl")
 # include("constraint_vals.jl")
 # include("constraint_sets.jl")
 # include("constraint_block.jl")

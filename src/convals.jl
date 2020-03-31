@@ -119,6 +119,7 @@ struct ConVal{C,V,M,W}
     ∇x::Matrix{W}
     ∇u::Matrix{W}
     c_max::Vector{Float64}
+	is_const::Vector{Bool}  # are the Jacobians constant
 	iserr::Bool  # are the Jacobians on the error state
     function ConVal(n::Int, m::Int, con::AbstractConstraint, inds::UnitRange, jac, vals, iserr::Bool=false)
 		if !iserr && size(gen_jacobian(con)) != size(jac[1])
@@ -132,8 +133,9 @@ struct ConVal{C,V,M,W}
 		∇x = [v[1] for v in views]
 		∇u = [v[2] for v in views]
         c_max = zeros(P)
+		is_const = zeros(Bool,P)
         new{typeof(con), eltype(vals), eltype(jac), eltype(∇x)}(con,
-			inds, vals, jac, ∇x, ∇u, c_max, iserr)
+			inds, vals, jac, ∇x, ∇u, c_max, is_const, iserr)
     end
 end
 
@@ -164,12 +166,15 @@ function evaluate!(cval::ConVal, Z::Traj)
     end
 end
 
-function jacobian!(cval::ConVal, Z::Traj)
+function jacobian!(cval::ConVal, Z::Traj, init::Bool=false)
 	if cval.iserr
 		throw(ErrorException("Can't evaluate Jacobians directly on the error state Jacobians"))
 	else
+		is_const = cval.is_const
 	    for (i,k) in enumerate(cval.inds)
-	        jacobian!(cval.jac[i], cval.con, Z[k])
+			if init || !is_const[i]
+	        	is_const[i] = jacobian!(cval.jac[i], cval.con, Z[k])
+			end
 	    end
 	end
 end

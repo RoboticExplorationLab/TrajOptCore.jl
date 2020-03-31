@@ -39,7 +39,7 @@ At least 2 of `dt`, `tf`, and `N` need to be specified (or just 1 of `dt` and `t
 struct Problem{Q<:QuadratureRule,T<:AbstractFloat}
     model::AbstractModel
     obj::AbstractObjective
-    constraints::ConstraintSet{T}
+    constraints::ConstraintList
     x0::MVector
     xf::MVector
     Z::Traj
@@ -47,7 +47,7 @@ struct Problem{Q<:QuadratureRule,T<:AbstractFloat}
     t0::T
     tf::T
     function Problem{Q}(model::AbstractModel, obj::AbstractObjective,
-            constraints::ConstraintSet,
+            constraints::ConstraintList,
             x0::StaticVector, xf::StaticVector,
             Z::Traj, N::Int, t0::T, tf::T) where {Q,T}
         n,m = size(model)
@@ -63,7 +63,7 @@ Problem(model, obj, constraints, x0, xf, Z, N, t0, tf) =
     Problem{RK3}(model, obj, constraints, x0, xf, Z, N, t0, tf)
 
 function Problem(model::L, obj::O, xf::AbstractVector, tf;
-        constraints=ConstraintSet(size(model)...,length(obj)),
+        constraints=ConstraintList(size(model)...,length(obj)),
         t0=zero(tf),
         x0=zero(xf), N::Int=length(obj),
         X0=[x0*NaN for k = 1:N],
@@ -213,21 +213,21 @@ function Problem(p::Problem; model=p.model, obj=p.obj, constraints=p.constraints
     Problem(model, obj, constraints, x0, xf, p.Z, p.N, t0, tf)
 end
 
-"```julia
-add_dynamics_constraints!(prob::Problem)
-```
-Add dynamics constraints to the constraint set"
-function add_dynamics_constraints!(prob::Problem{Q}, integration=Q) where Q
-	n,m = size(prob)
-    conSet = prob.constraints
-
-    # Implicit dynamics
-    dyn_con = ConstraintVals(DynamicsConstraint{integration}(prob.model, prob.N), 1:prob.N-1)
-    add_constraint!(conSet, dyn_con) # add it at the end
-
-    # Initial condition
-    init_con = ConstraintVals( GoalConstraint(prob.x0), 1:1)
-    add_constraint!(conSet, init_con, 1)  # add it at the top
-
-    return nothing
-end
+# "```julia
+# add_dynamics_constraints!(prob::Problem)
+# ```
+# Add dynamics constraints to the constraint set"
+# function add_dynamics_constraints!(prob::Problem{Q}, integration=Q) where Q
+# 	n,m = size(prob)
+#     conSet = prob.constraints
+#
+#     # Implicit dynamics
+#     dyn_con = ConstraintVals(DynamicsConstraint{integration}(prob.model, prob.N), 1:prob.N-1)
+#     add_constraint!(conSet, dyn_con) # add it at the end
+#
+#     # Initial condition
+#     init_con = ConstraintVals( GoalConstraint(prob.x0), 1:1)
+#     add_constraint!(conSet, init_con, 1)  # add it at the top
+#
+#     return nothing
+# end

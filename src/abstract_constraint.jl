@@ -278,3 +278,11 @@ end
 @inline Base.length(cons::ConstraintList) = length(cons.constraints)
 
 @inline Base.getindex(cons::ConstraintList, i::Int) = cons.constraints[i]
+
+function Base.copy(cons::ConstraintList)
+	cons2 = ConstraintList(cons.n, cons.m, length(cons.p))
+	for i in eachindex(cons.constraints)
+		add_constraint!(cons2, cons.constraints[i], copy(cons.inds[i]))
+	end
+	return cons2
+end

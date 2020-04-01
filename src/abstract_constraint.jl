@@ -160,14 +160,14 @@ For W<:General,this must function must be explicitly defined. Other types may de
 function evaluate!(vals::Vector{<:AbstractVector}, con::StageConstraint,
 		Z::Traj, inds=1:length(Z))
 	for (i,k) in enumerate(inds)
-		vals[i] = evaluate(con, Z[k])
+		vals[i] .= evaluate(con, Z[k])
 	end
 end
 
 function evaluate!(vals::Vector{<:AbstractVector}, con::CoupledConstraint,
 		Z::Traj, inds=1:length(Z)-1)
 	for (i,k) in enumerate(inds)
-		vals[i] = evaluate(con, Z[k+1], Z[k])
+		vals[i] .= evaluate(con, Z[k], Z[k+1])
 	end
 end
 
@@ -188,15 +188,15 @@ For W<:General,this must function must be explicitly defined. Other types may de
 function jacobian!(∇c::VecOrMat{<:AbstractMatrix}, con::StageConstraint,
 		Z::Traj, inds=1:length(Z))
 	for (i,k) in enumerate(inds)
-		jacobian!(∇c[i], con, Z[k], 1)
+		jacobian!(∇c[i], con, Z[k])
 	end
 end
 
 function jacobian!(∇c::VecOrMat{<:AbstractMatrix}, con::CoupledConstraint,
-		Z::Traj, inds=1:length(Z))
+		Z::Traj, inds=1:size(∇c,1))
 	for (i,k) in enumerate(inds)
-		jacobian!(∇c[i], con, Z[k+1], Z[k], 1)
-		jacobian!(∇c[i], con, Z[k+1], Z[k], 2)
+		jacobian!(∇c[i,1], con, Z[k], Z[k+1], 1)
+		jacobian!(∇c[i,2], con, Z[k], Z[k+1], 2)
 	end
 end
 
@@ -219,13 +219,18 @@ function jacobian!(∇c, con::StageConstraint, x::StaticVector)
 	return false
 end
 
-function jacobian!(∇c, con::StageConstraint, x::StaticVector, u::StaticVector)
-	eval_c(x) = evaluate(con, StaticKnotPoint(z, x))
-	∇c .= ForwardDiff.jacobian(eval_c, [x; u])
-	return false
-end
+# function jacobian!(∇c, con::StageConstraint, x::StaticVector, u::StaticVector)
+# 	eval_c(z) = evaluate(con, StaticKnotPoint(z))
+# 	∇c .= ForwardDiff.jacobian(eval_c, [x; u])
+# 	return false
+# end
 
 @inline gen_jacobian(con::AbstractConstraint) = SizedMatrix{size(con)...}(zeros(size(con)))
+function gen_jacobian(con::CoupledConstraint)
+	ws = widths(con)
+	p = length(con)
+	C1 = SizedMatrix{p,ws[1]}(zeros(p,ws[1]))
+end
 
 function gen_views(∇c::AbstractMatrix, con::StateConstraint, n=state_dim(con), m=0)
 	view(∇c,:,1:n), view(∇c,:,n:n-1)
@@ -243,7 +248,9 @@ end
 ############################################################################################
 #					             CONSTRAINT LIST										   #
 ############################################################################################
-struct ConstraintList
+abstract type AbstractConstraintSet end
+
+struct ConstraintList <: AbstractConstraintSet
 	n::Int
 	m::Int
 	constraints::Vector{AbstractConstraint}
@@ -269,6 +276,7 @@ function add_constraint!(cons::ConstraintList, con::AbstractConstraint, inds::Un
 	else
 		throw(ArgumentError("cannot insert constraint at index=$idx. Length = $(length(cons))"))
 	end
+	num_constraints!(cons)
 	@assert length(cons.constraints) == length(cons.inds)
 end
 
@@ -285,4 +293,16 @@ function Base.copy(cons::ConstraintList)
 		add_constraint!(cons2, cons.constraints[i], copy(cons.inds[i]))
 	end
 	return cons2
+end
+
+@inline num_constraints(cons::ConstraintList) = cons.p
+
+function num_constraints!(cons::ConstraintList)
+	cons.p .*= 0
+	for i = 1:length(cons)
+		p = length(cons[i])
+		for k in cons.inds[i]
+			cons.p[k] += p
+		end
+	end
 end

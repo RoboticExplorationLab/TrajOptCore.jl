@@ -1,5 +1,4 @@
 
-abstract type AbstractConstraintSet end
 
 mutable struct ConstraintParams{T}
 	ϕ::T  	    # penalty scaling parameter
@@ -23,6 +22,7 @@ struct ALConstraintSet{T} <: AbstractConstraintSet
     μ_max::Vector{T}
     μ_maxes::Vector{Vector{T}}
 	params::Vector{ConstraintParams{T}}
+	p::Vector{Int}
 end
 
 function ALConstraintSet(cons::ConstraintList, model::AbstractModel)
@@ -37,6 +37,8 @@ function ALConstraintSet(cons::ConstraintList, model::AbstractModel)
     convals = map(errvals) do errval
         ConVal(n, m, errval)
     end
+	errvals = convert(Vector{ConVal}, errvals)
+	convals = convert(Vector{ConVal}, convals)
     λ = map(1:ncon) do i
         p = length(cons[i])
         [@SVector zeros(p) for i in cons.inds[i]]
@@ -53,7 +55,47 @@ function ALConstraintSet(cons::ConstraintList, model::AbstractModel)
     μ_max = zeros(ncon)
     μ_maxes = [zeros(length(ind)) for ind in cons.inds]
 	params = [ConstraintParams() for con in cons.constraints]
-    ALConstraintSet(convals, errvals, λ, μ, a, c_max, μ_max, μ_maxes, params)
+    ALConstraintSet(convals, errvals, λ, μ, a, c_max, μ_max, μ_maxes, params, cons.p)
+end
+
+@inline ALConstraintSet(prob::Problem) = ALConstraintSet(prob.constraints, prob.model)
+
+# Iteration
+Base.iterate(conSet::ALConstraintSet) =
+	isempty(conSet.convals) ? nothing : (conSet.convals[1].con,1)
+Base.iterate(conSet::ALConstraintSet, state::Int) =
+	state >= length(conSet) ? nothing : (conSet.convals[state+1].con, state+1)
+@inline Base.length(conSet) = length(conSet.convals)
+Base.IteratorSize(::ALConstraintSet) = Base.HasLength()
+Base.IteratorEltype(::ALConstraintSet) = Base.HasEltype()
+Base.eltype(::ALConstraintSet) = AbstractConstraint
+
+"""
+	link_constraints!(set1, set2)
+
+Link any common constraints between `set1` and `set2` by setting elements in `set1` to point
+to elements in `set2`
+"""
+function link_constraints!(set1::ALConstraintSet, set2::ALConstraintSet)
+	# Find common constraints
+	links = Tuple{Int,Int}[]
+	for (i,con1) in enumerate(set1)
+		for (j,con2) in enumerate(set2)
+			if con1 === con2
+				push!(links, (i,j))
+			end
+		end
+	end
+
+	# Link values
+	for (i,j) in links
+		set1.convals[i] = set2.convals[j]
+		set1.errvals[i] = set2.errvals[j]
+		set1.active[i] = set2.active[j]
+		set1.λ[i] = set2.λ[j]
+		set1.μ[i] = set2.μ[j]
+	end
+	return links
 end
 
 # Constraint Evaluation
@@ -141,7 +183,7 @@ end
 
 function reset_penalties!(conSet::ALConstraintSet)
     for i in eachindex(conSet.μ)
-        reset!(conSet.μ[i], 1.0)
+        reset!(conSet.μ[i], conSet.params[i].μ0)
     end
 end
 
@@ -192,7 +234,7 @@ function update_active_set!(a::Vector{<:StaticVector}, λ::Vector{<:StaticVector
 		conval::ConVal, ::Val{tol}) where tol
 	if sense(conval.con) == Inequality()
 		for i in eachindex(a)
-			a[i] = @. (conval.vals[i] >= -tol) | (λ[i] > tol)
+			a[i] = @. (conval.vals[i] >= -tol) | (λ[i] > zero(tol))
 		end
 	end
 end

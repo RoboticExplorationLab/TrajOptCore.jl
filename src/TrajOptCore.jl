@@ -60,12 +60,12 @@ export
     AbstractConstraint,
     Inequality,
     Equality,
-    Stage,
-    State,
-    Control,
-    Coupled,
-    Dynamical,
+    StageConstraint,
+    StateConstraint,
+    ControlConstraint,
+    CoupledConstraint,
     ConstraintParams,
+	ConVal,
 	ConstraintBlock
 
 # constraint methods
@@ -114,11 +114,11 @@ include("integration.jl")
 
 include("cost.jl")
 include("convals.jl")
-include("conset.jl")
 # include("constraint_vals.jl")
 # include("constraint_sets.jl")
 # include("constraint_block.jl")
 include("problem.jl")
+include("conset.jl")
 
 include("utils.jl")
 end # module

@@ -152,30 +152,34 @@ function ConVal(n::Int, m::Int, cval::ConVal)
 	end
 end
 
+function ConVal(n::Int, m::Int, con::AbstractConstraint, inds::UnitRange{Int}, iserr::Bool=false)
+	C,c = gen_convals(n,m,con,inds)
+	ConVal(n, m, con, inds, C, c)
+end
+
 function _index(cval::ConVal, k::Int)
 	if k ∈ cval.inds
-		return k - con.inds[1] + 1
+		return k - cval.inds[1] + 1
 	else
 		return 0
 	end
 end
 
 function evaluate!(cval::ConVal, Z::Traj)
-    for (i,k) in enumerate(cval.inds)
-        cval.vals[i] .= evaluate(cval.con, Z[k])
-    end
+	evaluate!(cval.vals, cval.con, Z, cval.inds)
 end
 
 function jacobian!(cval::ConVal, Z::Traj, init::Bool=false)
 	if cval.iserr
 		throw(ErrorException("Can't evaluate Jacobians directly on the error state Jacobians"))
 	else
-		is_const = cval.is_const
-	    for (i,k) in enumerate(cval.inds)
-			if init || !is_const[i]
-	        	is_const[i] = jacobian!(cval.jac[i], cval.con, Z[k])
-			end
-	    end
+		jacobian!(cval.jac, cval.con, Z, cval.inds)
+		# is_const = cval.is_const
+	    # for (i,k) in enumerate(cval.inds)
+		# 	if init || !is_const[i]
+	    #     	is_const[i] = jacobian!(cval.jac[i], cval.con, Z[k])
+		# 	end
+	    # end
 	end
 end
 

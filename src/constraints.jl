@@ -60,6 +60,10 @@ function jacobian!(∇c, con::GoalConstraint, z::KnotPoint)
 	return true
 end
 
+function change_dimension(con::GoalConstraint, n::Int, m::Int, xi=1:n, ui=1:m)
+	GoalConstraint(n, con.xf, xi[con.inds])
+end
+
 
 ############################################################################################
 #                              LINEAR CONSTRAINTS 										   #
@@ -81,36 +85,40 @@ struct LinearConstraint{S,P,W,T} <: StageConstraint
 	A::SizedMatrix{P,W,T,2}
 	b::SVector{P,T}
 	sense::S
+	inds::SVector{W,Int}
+	function LinearConstraint(n::Int, m::Int, A::StaticMatrix{P,W,T}, b::StaticVector{P,T},
+			sense::ConstraintSense, inds=1:n+m) where {P,W,T}
+		@assert length(inds) == W
+		inds = SVector{W}(inds)
+		new{typeof(sense),P,W,T}(n,m,A,b,sense,inds)
+	end
 end
 
 function LinearConstraint(n::Int, m::Int, A::AbstractMatrix, b::AbstractVector,
-		sense::S) where {S<:ConstraintSense}
+		sense::S, inds=1:n+m) where {S<:ConstraintSense}
 	@assert size(A,1) == length(b)
 	p,q = size(A)
 	A = SizedMatrix{p,q}(A)
 	b = SVector{p}(b)
-	LinearConstraint{S,p,q,eltype(A)}(n,m, A, b, sense)
+	LinearConstraint(n,m, A, b, sense, inds)
 end
 
-function LinearConstraint(n::Int, m::Int, A::StaticMatrix{P,W,T}, b::StaticVector{P,T},
-		sense::ConstraintSense) where {P,W,T}
-	if P != n+m
-		throw(ArgumentError("size(A,2) must equal n+m"))
-	end
-	LinearConstraint(n,m,A,b,sense)
-end
 
 @inline sense(con::LinearConstraint) = con.sense
 @inline Base.length(con::LinearConstraint{<:Any,P}) where P = P
 @inline state_dim(con::LinearConstraint) = con.n
 @inline control_dim(con::LinearConstraint) = con.m
-evaluate(con::LinearConstraint, z::AbstractKnotPoint) = con.A*z.z .- con.b
+evaluate(con::LinearConstraint, z::AbstractKnotPoint) = con.A*z.z[con.inds] .- con.b
 function jacobian!(∇c, con::LinearConstraint, z::AbstractKnotPoint)
-	∇c .= con.A
+	∇c[:,con.inds] .= con.A
 	return true
 end
 
-
+function change_dimension(con::LinearConstraint, n::Int, m::Int, ix=1:n, iu=1:m)
+	inds0 = [ix; n .+ iu]  # indices of original z in new z
+	inds = inds0[con.inds] # indices of elements in new z
+	LinearConstraint(n, m, con.A, con.b, con.sense, inds)
+end
 
 ############################################################################################
 #                              CIRCLE/SPHERE CONSTRAINTS 								   #
@@ -167,6 +175,9 @@ end
 @inline Base.length(::CircleConstraint{P}) where P = P
 @inline sense(::CircleConstraint) = Inequality()
 
+function change_dimension(con::CircleConstraint, n::Int, m::Int, ix=1:n, iu=1:m)
+	CircleConstraint(n, con.x, con.y, con.radius, ix[con.xi], ix[con.yi])
+end
 
 """
 	SphereConstraint{P,T}
@@ -226,6 +237,10 @@ function jacobian!(con::SphereConstraint, X::SVector)
 	return false
 end
 
+function change_dimension(con::SphereConstraint, n::Int, m::Int, ix=1:n, iu=1:m)
+	SphereConstraint(n, con.x, con.y, con.z, con.radius, ix[con.xi], ix[con.yi], ix[con.zi])
+end
+
 ############################################################################################
 #  								SELF-COLLISION CONSTRAINT 								   #
 ############################################################################################
@@ -257,6 +272,10 @@ function jacobian!(∇c, con::CollisionConstraint, x::SVector)
 	∇c[1,con.x1] .= ∇x1
 	∇c[1,con.x2] .= ∇x2
 	return false
+end
+
+function change_dimension(con::CollisionConstraint, n::Int, m::Int, ix=1:n, iu=1:m)
+	CollisionConstraint(n, ix[con.x1], ix[con.x2], con.radius)
 end
 
 ############################################################################################
@@ -322,6 +341,10 @@ function jacobian!(∇c, con::NormConstraint, z::AbstractKnotPoint)
 	x = z.z[con.inds]
 	∇c[1,con.inds] .= 2*x
 	return false
+end
+
+function change_dimension(con::NormConstraint, n::Int, m::Int, ix=1:n, iu=1:m)
+	NormConstraint(n, m, con.val, con.sense, ix[con.inds])
 end
 
 
@@ -450,6 +473,18 @@ function jacobian!(∇c, bnd::BoundConstraint{U,L}, z::AbstractKnotPoint) where 
 	return true
 end
 
+function change_dimension(con::BoundConstraint, n::Int, m::Int, ix=1:n, iu=1:m)
+	n0,m0 = con.n, con.m
+	x_max = fill(Inf,n)
+	x_min = fill(Inf,n)
+	u_max = fill(Inf,m)
+	u_min = fill(Inf,m)
+	x_max[ix] = con.z_max[1:n0]
+	x_min[ix] = con.z_min[1:n0]
+	u_max[iu] = con.z_max[n0 .+ (1:m0)]
+	u_min[iu] = con.z_min[n0 .+ (1:m0)]
+	BoundConstraint(n, m, x_max=x_max, x_min=x_min, u_max=u_max, u_min=u_min)
+end
 
 ############################################################################################
 #  							VARIABLE BOUND CONSTRAINT 									   #
@@ -637,6 +672,10 @@ end
 		$assignment
 		return isconst
 	end
+end
+
+function change_dimension(con::AbstractConstraint, n::Int, m::Int, ix=1:n, iu=1:m)
+	IndexedConstraint(n, m, con, ix, iu)
 end
 #
 # # TODO: define higher-level evaluate! function instead

@@ -283,7 +283,13 @@ end
 @inline add_constraint!(cons::ConstraintList, con::AbstractConstraint, k::Int, idx=-1) =
 	add_constraint!(cons, con, k:k, idx)
 
+# Iteration
+Base.iterate(cons::ConstraintList) = length(cons) == 0 ? nothing : (cons[1], 1)
+Base.iterate(cons::ConstraintList, i) = i < length(cons) ? (cons[i+1], i+1) : nothing
 @inline Base.length(cons::ConstraintList) = length(cons.constraints)
+Base.IteratorSize(::ConstraintList) = Base.HasLength()
+Base.IteratorEltype(::ConstraintList) = Base.HasEltype()
+Base.eltype(::ConstraintList) = AbstractConstraint
 
 @inline Base.getindex(cons::ConstraintList, i::Int) = cons.constraints[i]
 
@@ -305,4 +311,13 @@ function num_constraints!(cons::ConstraintList)
 			cons.p[k] += p
 		end
 	end
+end
+
+function change_dimension(cons::ConstraintList, n::Int, m::Int, ix=1:n, iu=1:m)
+	new_list = ConstraintList(n, m, length(cons.p))
+	for (i,con) in enumerate(cons)
+		new_con = change_dimension(con, n, m, ix, iu)
+		add_constraint!(new_list, new_con, cons.inds[i])
+	end
+	return new_list
 end

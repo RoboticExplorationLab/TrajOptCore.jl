@@ -172,7 +172,7 @@ end
 # Reset
 function reset!(conSet::ALConstraintSet)
     reset_duals!(conSet)
-    reset_penalites!(conSet)
+    reset_penalties!(conSet)
 end
 
 function reset_duals!(conSet::ALConstraintSet)

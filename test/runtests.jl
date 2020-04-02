@@ -2,9 +2,8 @@ using TrajOptCore
 using RobotZoo
 using StaticArrays
 using LinearAlgebra
-using Dynamics
 using Test
-using DifferentialRotations
+using RobotDynamics
 const TOC = TrajOptCore
 include("cartpole_problem.jl")
 

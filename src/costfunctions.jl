@@ -33,11 +33,35 @@ struct DiagonalCost{n,m,T} <: QuadraticCostFunction
     r::SVector{m,T}
     c::T
     terminal::Bool
+    function DiagonalCost(Qd::StaticVector{n}, Rd::StaticVector{m},
+                          q::StaticVector{n},  r::StaticVector{m},
+                          c::Real, terminal::Bool=false) where {n,m}
+        T = promote_type(typeof(c), eltype(Qd), eltype(Rd), eltype(q), eltype(r))
+        new{n,m,T}(Diagonal(SVector(Qd)), Diagonal(SVector(Rd)), SVector(q), SVector(r), T(c))
+    end
 end
 
-function DiagonalCost(Q::Diagonal{T,<:SVector{n}},R::Diagonal{T,<:SVector{m}},
+function DiagonalCost(Q::Diagonal{T,<:StaticVector{n}},R::Diagonal{T,<:StaticVector{m}},
         q=(@SVector zeros(T,n)), r=(@SVector zeros(T,m)), c=zero(T), terminal=false) where {T,n,m}
-    DiagonalCost(Q,R,q,r,c, terminal)
+    DiagonalCost(diag(Q), diag(R), q, r, c, terminal)
+end
+
+function DiagonalCost(Q::AbstractVector, R::AbstractVector,
+        q::AbstractVector, r::AbstractVector, c=0.0, terminal=false)
+    n,m = length(Q), length(R)
+    Q = SVector{n}(Q)
+    R = SVector{m}(R)
+    q = SVector{n}(q)
+    r = SVector{m}(r)
+    DiagonalCost(Q, R, q, r, c, terminal)
+end
+
+function DiagonalCost(Q::AbstractVector, R::AbstractVector, terminal=false)
+    n,m = length(Q), length(R)
+    q = @SVector zeros(n)
+    r = @SVector zeros(m)
+    c = zero(eltype(Q))
+    DiagonalCost(Q, R, q, r, c, terminal)
 end
 
 state_dim(::DiagonalCost{n}) where n = n
@@ -90,6 +114,18 @@ function Base.:+(cost1::DiagonalCost, cost2::DiagonalCost)
     terminal = cost1.terminal || cost2.terminal
     DiagonalCost(cost1.Q + cost2.Q, cost1.R + cost2.R, cost1.q + cost2.q, cost1.r + cost2.r,
         cost1.c + cost2.c, terminal)
+end
+
+function change_dimension(cost::DiagonalCost, n::Int, m::Int, ix, iu)
+    Qd = zeros(n)
+    Rd = zeros(m)
+    q = zeros(n)
+    r = zeros(m)
+    Qd[ix] = diag(cost.Q)
+    Rd[iu] = diag(cost.R)
+    q[ix] = cost.q
+    r[iu] = cost.r
+    DiagonalCost(Qd, Rd, q, r, cost.c, cost.terminal)
 end
 
 """
@@ -224,8 +260,8 @@ function stage_cost(cost::QuadraticCost, xN::AbstractVector{T}) where T
 end
 
 function gradient!(E::QuadraticCost, cost::QuadraticCost, x, u)
-    E.Q .= cost.Q*x .+ cost.q .+ cost.H'u
-    E.R .= cost.R*u .+ cost.r .+ cost.H*x
+    E.q .= cost.Q*x .+ cost.q .+ cost.H'u
+    E.r .= cost.R*u .+ cost.r .+ cost.H*x
     return false
 end
 

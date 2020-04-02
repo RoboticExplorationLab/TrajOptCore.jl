@@ -257,7 +257,7 @@ end
 
 function cost_expansion!(E::Objective, conSet::ALConstraintSet, Z::Traj, init::Bool=false)
 	for i in eachindex(conSet.errvals)
-		cost_expansion!(E, conSet.errvals[i], conSet.λ[i], conSet.μ[i], conSet.active[i])
+		cost_expansion!(E, conSet.convals[i], conSet.λ[i], conSet.μ[i], conSet.active[i])
 	end
 end
 

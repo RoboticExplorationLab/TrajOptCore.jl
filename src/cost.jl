@@ -68,7 +68,7 @@ function error_expansion!(E::Objective, Jexp::Objective, model::AbstractModel, Z
     return nothing
 end
 
-function error_expansion!(E::Objective, Jexp::Objective, model::RigidBody, Z::Traj, G, tmp=G[end])
+function error_expansion!(E::Objective, Jexp::Objective, model::LieGroupModel, Z::Traj, G, tmp=G[end])
     for k in eachindex(E.cost)
         error_expansion!(E.cost[k], Jexp.cost[k], model, Z[k], G[k], tmp)
     end

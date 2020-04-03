@@ -29,7 +29,7 @@ function ALConstraintSet(cons::ConstraintList, model::AbstractModel)
     n,m = cons.n, cons.m
     n̄ = RobotDynamics.state_diff_size(model)
     ncon = length(cons)
-    useG = model isa RigidBody
+    useG = model isa LieGroupModel
     errvals = map(1:ncon) do i
         C,c = gen_convals(n̄, m, cons[i], cons.inds[i])
         ConVal(n̄, m, cons[i], cons.inds[i], C, c, useG)

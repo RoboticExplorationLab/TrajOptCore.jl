@@ -230,12 +230,12 @@ function LQRCost(Q::AbstractArray, R::AbstractArray,
     return QuadraticCost(Q, R, H, q, r, c, checks=checks, terminal=false)
 end
 
-function LQRCost(Q::Diagonal{<:Any,SVector{n}},R::Diagonal{<:Any,SVector{m}},
+function LQRCost(Q::Diagonal{<:Any,<:SVector{n}},R::Diagonal{<:Any,<:SVector{m}},
         xf::AbstractVector, uf=(@SVector zeros(m))) where {n,m}
     q = -Q*xf
     r = -R*uf
     c = 0.5*xf'*Q*xf + 0.5*uf'R*uf
-    return DiagonalCost(Q, R, H, q, r, c, false)
+    return DiagonalCost(Q, R, q, r, c, false)
 end
 
 """
@@ -364,7 +364,7 @@ end
 
 
 ############################################################################################
-#                                 QUADRATIC QUATERNION COST FUNCTION
+#                        QUADRATIC QUATERNION COST FUNCTION
 ############################################################################################
 
 struct QuadraticQuatCost{T,N,M,N4} <: CostFunction

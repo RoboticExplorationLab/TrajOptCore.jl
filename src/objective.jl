@@ -127,8 +127,10 @@ Create an objective of the form
 `` (x_N - x_f)^T Q_f (x_N - x_f) + \sum_{k=0}^{N-1} (x_k-x_f)^T Q (x_k-x_f) + u_k^T R u_k``
 """
 function LQRObjective(Q::AbstractArray, R::AbstractArray, Qf::AbstractArray,
-        xf::AbstractVector, N::Int; checks=true, uf=zeros(size(R,1)))
-    H = zeros(size(R,1),size(Q,1))
+        xf::AbstractVector, N::Int; checks=true, uf=@SVector zeros(size(R,1)))
+    n = size(Q,1)
+    m = size(R,1)
+    H = SizedMatrix{m,n}(zeros(m,n))
     q = -Q*xf
     r = -R*uf
     c = 0.5*xf'*Q*xf + 0.5*uf'R*uf
@@ -136,7 +138,8 @@ function LQRObjective(Q::AbstractArray, R::AbstractArray, Qf::AbstractArray,
     cf = 0.5*xf'*Qf*xf
 
     ℓ = QuadraticCost(Q, R, H, q, r, c, checks=checks)
-    ℓN = QuadraticCost(Qf, qf, cf, check=checks, terminal=true)
+    ℓN = QuadraticCost(Q, R*0, H*0, q, r*0, c, checks=false, terminal=true)
+    # ℓN = QuadraticCost(Qf, qf, cf, check=checks, terminal=true)
 
     Objective(ℓ, ℓN, N)
 end

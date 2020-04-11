@@ -16,7 +16,7 @@ import Base: copy, +
 
 abstract type CostFunction end
 
-abstract type QuadraticCostFunction <: CostFunction end
+abstract type QuadraticCostFunction{n,m,T} <: CostFunction end
 
 @inline QuadraticCostFunction(cost::QuadraticCostFunction) = cost
 @inline QuadraticCostFunction(cost::CostFunction) =
@@ -26,7 +26,7 @@ abstract type QuadraticCostFunction <: CostFunction end
 #              COST FUNCTION INTERFACE                #
 #######################################################
 
-struct DiagonalCost{n,m,T} <: QuadraticCostFunction
+struct DiagonalCost{n,m,T} <: QuadraticCostFunction{n,m,T}
     Q::Diagonal{T,SVector{n,T}}
     R::Diagonal{T,SVector{m,T}}
     q::SVector{n,T}
@@ -37,7 +37,8 @@ struct DiagonalCost{n,m,T} <: QuadraticCostFunction
                           q::StaticVector{n},  r::StaticVector{m},
                           c::Real, terminal::Bool=false) where {n,m}
         T = promote_type(typeof(c), eltype(Qd), eltype(Rd), eltype(q), eltype(r))
-        new{n,m,T}(Diagonal(SVector(Qd)), Diagonal(SVector(Rd)), SVector(q), SVector(r), T(c))
+        new{n,m,T}(Diagonal(SVector(Qd)), Diagonal(SVector(Rd)), SVector(q), SVector(r),
+            T(c), terminal)
     end
 end
 
@@ -75,17 +76,6 @@ function stage_cost(cost::DiagonalCost, x::SVector)
     return 0.5*x'cost.Q*x + cost.q'x + cost.c
 end
 
-function gradient!(E::AbstractExpansion, cost::DiagonalCost, x, u)
-    E.x .= cost.Q*x .+ cost.q
-    E.u .= cost.R*u .+ cost.r
-end
-
-function hessian!(E::AbstractExpansion, cost::DiagonalCost, x, u)
-    E.xx .= cost.Q
-    E.uu .= cost.R
-    E.ux .= 0
-end
-
 function gradient!(E::QuadraticCostFunction, cost::DiagonalCost, x, u)
     E.q .= cost.Q*x .+ cost.q
     E.r .= cost.R*u .+ cost.r
@@ -93,9 +83,17 @@ function gradient!(E::QuadraticCostFunction, cost::DiagonalCost, x, u)
 end
 
 function hessian!(E::QuadraticCostFunction, cost::DiagonalCost, x, u)
-    E.Q .= cost.Q
-    E.R .= cost.R
+    for i = 1:length(x)
+        E.Q[i,i] = cost.Q[i,i]
+    end
+    for i = 1:length(u)
+        E.R[i,i] = cost.R[i,i]
+    end
     return true
+end
+
+function Base.copy(cost::DiagonalCost)
+    DiagonalCost(copy(cost.Q), copy(cost.R), copy(cost.q), copy(cost.r), cost.c, cost.terminal)
 end
 
 function LinearAlgebra.inv(cost::DiagonalCost)
@@ -142,7 +140,7 @@ QuadraticCost(Q, q, c)
 ```
 Any optional or omitted values will be set to zero(s).
 """
-mutable struct QuadraticCost{n,m,T,TQ,TR} <: QuadraticCostFunction
+mutable struct QuadraticCost{n,m,T,TQ,TR} <: QuadraticCostFunction{n,m,T}
     Q::TQ                     # Quadratic stage cost for states (n,n)
     R::TR                     # Quadratic stage cost for controls (m,m)
     H::SizedMatrix{m,n,T,2}   # Quadratic Cross-coupling for state and controls (m,n)
@@ -187,14 +185,14 @@ state_dim(cost::QuadraticCost) = length(cost.q)
 control_dim(cost::QuadraticCost) = length(cost.r)
 
 # Constructors
-function QuadraticCost(Q,R; H=similar(Q,size(Q,1), size(R,1))*0, q=zeros(size(Q,1)),
+function QuadraticCost(Q,R; H=similar(Q,size(R,1), size(Q,1))*0, q=zeros(size(Q,1)),
         r=zeros(size(R,1)), c=0.0, checks=true, terminal=false)
     QuadraticCost(Q,R,H,q,r,c, checks=checks, terminal=terminal)
 end
 
-function QuadraticCost(Q::Union{Diagonal{T,SVector{N,T}}, SMatrix{N,N,T}},
-            R::Union{Diagonal{T,SVector{M,T}}, SMatrix{M,M,T}};
-            H=SizedMatrix{N,M}(zeros(T,N,M)),
+function QuadraticCost(Q::Union{Diagonal{T,StaticVector{N,T}}, SMatrix{N,N,T}},
+            R::Union{Diagonal{T,StaticVector{M,T}}, SMatrix{M,M,T}};
+            H=SizedMatrix{M,N}(zeros(T,M,N)),
             q=(@SVector zeros(T,N)),
             r=(@SVector zeros(M)),
             c=0.0, checks=true, terminal=false) where {T,N,M}
@@ -265,32 +263,27 @@ function gradient!(E::QuadraticCost, cost::QuadraticCost, x, u)
     return false
 end
 
-function hessian!(E::QuadraticCost, cost::QuadraticCost, x, u)
-    E.Q .= cost.Q
-    E.R .= cost.R
+function hessian!(E::QuadraticCost{<:Any,<:Any,<:Any,TQ,TR}, cost::QuadraticCost, x, u) where {TQ,TR}
+    if TQ <: Diagonal
+        for i = 1:length(x)
+            E.Q[i,i] = cost.Q[i,i]
+        end
+    else
+        E.Q .= cost.Q
+    end
+    if TR <: Diagonal
+        for i = 1:length(u)
+            E.R[i,i] = cost.R[i,i]
+        end
+    else
+        E.R .= cost.R
+    end
+    if !cost.zeroH
+        E.H .= cost.H
+    end
     return true
 end
 
-function gradient!(E::AbstractExpansion, cost::QuadraticCost, x, u)
-    E.x .= cost.Q*x + cost.q + cost.H'u
-    E.u .= cost.R*u + cost.r + cost.H*x
-    return nothing
-    mul!(E.x, cost.Q, x)
-    E.x .+= cost.q
-    mul!(E.x, cost.H', u, 1.0, 1.0)
-
-    mul!(E.u, cost.R, u)
-    E.u .+= cost.r
-    mul!(E.u, cost.H, x, 1.0, 1.0)
-    return nothing
-end
-
-function hessian!(E::AbstractExpansion, cost::QuadraticCost, x, u)
-    E.xx .= cost.Q
-    E.uu .= cost.R
-    E.ux .= cost.H
-    return nothing
-end
 
 # Additional Methods
 # function Base.show(io::IO, cost::QuadraticCost)
@@ -362,7 +355,6 @@ end
 
 
 
-
 ############################################################################################
 #                        QUADRATIC QUATERNION COST FUNCTION
 ############################################################################################
@@ -410,7 +402,7 @@ function stage_cost(cost::QuadraticQuatCost, x::SVector)
     J += cost.w*min(1+dq, 1-dq)
 end
 
-function gradient(cost::QuadraticQuatCost{T,N,M}, x::SVector, u::SVector) where {T,N,M}
+function gradient!(E::QuadraticCost, cost::QuadraticQuatCost, x::SVector, u::SVector)
     Qx = cost.Q*x + cost.q
     q = x[cost.q_ind]
     dq = cost.q_ref'q
@@ -420,14 +412,16 @@ function gradient(cost::QuadraticQuatCost{T,N,M}, x::SVector, u::SVector) where 
         Qx -= cost.w*cost.Iq*cost.q_ref
     end
     Qu = cost.R*u + cost.r
-    return Qx, Qu
+    E.q .= Qx
+    E.r .= Qu
+    return false
 end
 
-function hessian(cost::QuadraticQuatCost, x::SVector{N}, u::SVector{M}) where {N,M}
-    Qxx = cost.Q
-    Quu = cost.R
-    Qux = @SMatrix zeros(M,N)
-    return Qxx, Quu, Qux
+function hessian!(E::QuadraticCost, cost::QuadraticQuatCost, x::SVector{N}, u::SVector{M}) where {N,M}
+    E.Q .= cost.Q
+    E.R .= cost.R
+    E.H .= @SMatrix zeros(M,N)
+    return true
 end
 
 function QuatLQRCost(Q::Diagonal{T,SVector{N,T}}, R::Diagonal{T,SVector{M,T}}, xf,

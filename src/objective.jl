@@ -83,6 +83,8 @@ Base.IteratorSize(obj::Objective) = Base.HasLength()
 Base.show(io::IO, obj::Objective{C}) where C = print(io,"Objective")
 
 const QuadraticObjective{n,m,T} = Objective{QuadraticCost{n,m,T,SizedMatrix{n,n,T,2},SizedMatrix{m,m,T,2}}}
+const QuadraticExpansion{n,m,T} = Objective{<:QuadraticCostFunction{n,m,T}}
+const DiagonalCostFunction{n,m,T} = Union{DiagonalCost{n,m,T},QuadraticCost{n,m,T,<:Diagonal,<:Diagonal}}
 
 QuadraticObjective(obj::Objective) = Objective(QuadraticCostFunction.(obj.cost))
 function QuadraticObjective(obj::AbstractObjective)
@@ -94,19 +96,40 @@ end
 
 function QuadraticObjective(n::Int, m::Int, N::Int)
     costfun = QuadraticCost{Float64}(n,m)
-    Objective([copy(costfun) for k = 1:N])
+    obj = Objective([copy(costfun) for k = 1:N])
+    obj.cost[end] = QuadraticCost(costfun.Q, costfun.R, costfun.H, costfun.q, costfun.r,
+        costfun.c; checks=false, terminal=true)
+    obj
 end
 
-function QuadraticObjective(obj::QuadraticObjective, model::AbstractModel)
-    # Create QuadraticObjective linked to error cost expansion
-    @assert RobotDynamics.state_diff_size(model) == size(model)[1]
-    return obj
-end
-
-function QuadraticObjective(obj::QuadraticObjective, model::LieGroupModel)
-    # Create QuadraticObjective partially linked to error cost expansion
-    @assert length(obj[1].q) == RobotDynamics.state_diff_size(model)
+function build_cost_expansion(obj::Objective{<:DiagonalCostFunction}, model::AbstractModel)
     n,m = size(model)
+    Q = Diagonal(SizedVector{n}(zeros(n)))
+    R = Diagonal(SizedVector{m}(zeros(m)))
+    if eltype(obj) <: QuadraticCost
+        H = [cost.H for cost in obj]
+    else
+        H = [zeros(m,n) for cost in obj]
+    end
+    J = Objective([QuadraticCost(copy(Q), copy(R), copy(H[k]), copy(obj[k].q), copy(obj[k].r),
+        obj[k].c, checks=false, terminal=obj[k].terminal) for k in eachindex(obj.cost)])  # error expansion
+    E = J                                                                     # cost expansion
+    return E, J
+end
+
+function build_cost_expansion(obj::AbstractObjective, model::AbstractModel)
+    n,m = size(model)
+    N = length(obj)
+    J = QuadraticObjective(n,m,N)
+    E = J
+    return E, J
+end
+
+function build_cost_expansion(obj::AbstractObjective, model::LieGroupModel)
+    n,m = size(model)
+    n̄ = RobotDynamics.state_diff_size(model)
+    J = QuadraticObjective(n,m,N)
+
     costfuns = map(obj.cost) do costfun
         Q = SizedMatrix{n,n}(zeros(n,n))
         R = costfun.R
@@ -116,8 +139,10 @@ function QuadraticObjective(obj::QuadraticObjective, model::LieGroupModel)
         c = costfun.c
         QuadraticCost(Q,R,H,q,r,c, checks=false, terminal=costfun.terminal)
     end
-    Objective(costfuns)
+    E = Objective(costfuns)
+    return E, J
 end
+
 
 # Convenience constructors
 @doc raw"""```julia
@@ -138,7 +163,7 @@ function LQRObjective(Q::AbstractArray, R::AbstractArray, Qf::AbstractArray,
     cf = 0.5*xf'*Qf*xf
 
     ℓ = QuadraticCost(Q, R, H, q, r, c, checks=checks)
-    ℓN = QuadraticCost(Q, R*0, H*0, q, r*0, c, checks=false, terminal=true)
+    ℓN = QuadraticCost(Qf, R*0, H*0, q, r*0, c, checks=false, terminal=true)
     # ℓN = QuadraticCost(Qf, qf, cf, check=checks, terminal=true)
 
     Objective(ℓ, ℓN, N)
@@ -158,7 +183,7 @@ function LQRObjective(
 
     ℓ = DiagonalCost(Q, R, q, r, c, false)
 
-    ℓN = DiagonalCost(Qf, R, qf, r, cf, true)
+    ℓN = DiagonalCost(Qf, R*0, qf, r*0, cf, true)
 
-    Objective(ℓ, ℓN, N)
+    obj = Objective(ℓ, ℓN, N)
 end

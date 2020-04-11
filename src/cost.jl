@@ -7,7 +7,7 @@
 
 "$(TYPEDSIGNATURES) Evaluate the cost at a knot point, and automatically handle terminal
 knot point, multiplying by dt as necessary."
-function stage_cost(cost::CostFunction, z::KnotPoint)
+function stage_cost(cost::CostFunction, z::AbstractKnotPoint)
     if is_terminal(z)
         stage_cost(cost, state(z))
     else
@@ -42,7 +42,7 @@ function cost_gradient!(E::Objective, obj::Objective, Z::Traj, init::Bool=false)
     end
 end
 
-function cost_hessian!(E::Objective, obj::Objective, Z::Traj, init::Bool=false)
+function cost_hessian!(E::Objective{C}, obj::Objective, Z::Traj, init::Bool=false) where C
     is_const = E.const_hess
     N = length(Z)
     for k in eachindex(Z)
@@ -52,7 +52,9 @@ function cost_hessian!(E::Objective, obj::Objective, Z::Traj, init::Bool=false)
             dt_u = k < N ? Z[k].dt : zero(Z[k].dt)
             E[k].Q .*= dt_x
             E[k].R .*= dt_u
-            E[k].H .*= dt_u
+			if C isa QuadraticCost
+            	E[k].H .*= dt_u
+			end
         end
     end
 end
@@ -76,6 +78,7 @@ end
 
 function error_expansion!(E::QuadraticCost, cost::QuadraticCost, model, z::AbstractKnotPoint,
         G, tmp)
+	E.Q .*= 0
     RobotDynamics.∇²differential!(E.Q, model, state(z), cost.q)
     if size(model)[1] < 15
         G = SMatrix(G)

@@ -23,7 +23,6 @@ struct Equality <: ConstraintSense end
 "Equality constraints of the form ``g(x) = 0``"
 struct Inequality <: ConstraintSense end
 
-
 """
 	AbstractConstraint
 
@@ -138,6 +137,12 @@ widths(con::CoupledControlConstraint, n=0, m=control_dim(con)) = (m,m)
 @inline check_dims(con::ControlConstraint,n,m) = control_dim(con) == m
 @inline check_dims(con::AbstractConstraint,n,m) = state_dim(con) == n && control_dim(con) == m
 
+get_dims(con::Union{StateConstraint,CoupledStateConstraint}, nm::Int) =
+	state_dim(con), nm - state_dim(con)
+get_dims(con::Union{ControlConstraint,CoupledControlConstraint}, nm::Int) =
+	nm - control_dim(con), control_dim(con)
+get_dims(con::AbstractConstraint, nm::Int) = state_dim(con), control_dim(con)
+
 con_label(::AbstractConstraint, i::Int) = "index $i"
 
 ############################################################################################
@@ -248,6 +253,31 @@ end
 ############################################################################################
 #					             CONSTRAINT LIST										   #
 ############################################################################################
+"""
+	AbstractConstraintSet
+
+Stores constraint error and Jacobian values, correctly accounting for the error state if
+necessary.
+
+# Interface
+- `get_convals(::AbstractConstraintSet)::Vector{<:ConVal}` where the size of the Jacobians
+	match the full state dimension
+- `get_errvals(::AbstractConstraintSet)::Vector{<:ConVal}` where the size of the Jacobians
+	match the error state dimension
+- must have field `c_max::Vector{<:AbstractFloat}` of length `length(get_convals(conSet))`
+
+# Methods
+Once the previous interface is defined, the following methods are defined
+- `Base.iterate`: iterates over `get_convals(conSet)`
+- `Base.length`: number of independent constraints
+- `evaluate!(conSet, Z::Traj)`: evaluate the constraints over the entire trajectory `Z`
+- `jacobian!(conSet, Z::Traj)`: evaluate the constraint Jacobians over the entire trajectory `Z`
+- `error_expansion!(conSet, model, G)`: evaluate the Jacobians for the error state using the
+	state error Jacobian `G`
+- `max_violation(conSet)`: return the maximum constraint violation
+- `findmax_violation(conSet)`: return details about the location of the maximum
+	constraint violation in the trajectory
+"""
 abstract type AbstractConstraintSet end
 
 struct ConstraintList <: AbstractConstraintSet
@@ -290,6 +320,10 @@ Base.iterate(cons::ConstraintList, i) = i < length(cons) ? (cons[i+1], i+1) : no
 Base.IteratorSize(::ConstraintList) = Base.HasLength()
 Base.IteratorEltype(::ConstraintList) = Base.HasEltype()
 Base.eltype(::ConstraintList) = AbstractConstraint
+Base.firstindex(::ConstraintList) = 1
+Base.lastindex(cons::ConstraintList) = length(cons.constraints)
+
+Base.zip(cons::ConstraintList) = zip(cons.inds, cons.constraints)
 
 @inline Base.getindex(cons::ConstraintList, i::Int) = cons.constraints[i]
 
@@ -320,4 +354,14 @@ function change_dimension(cons::ConstraintList, n::Int, m::Int, ix=1:n, iu=1:m)
 		add_constraint!(new_list, new_con, cons.inds[i])
 	end
 	return new_list
+end
+
+# sort the constraint list by stage < coupled, preserving ordering
+function Base.sort!(cons::ConstraintList; rev::Bool=false)
+	lt(con1,con2) = false
+	lt(con1::StageConstraint, con2::CoupledConstraint) = true
+	inds = sortperm(cons.constraints, alg=MergeSort, lt=lt, rev=rev)
+	permute!(cons.inds, inds)
+	permute!(cons.constraints, inds)
+	return cons
 end

@@ -1,113 +1,4 @@
 
-# struct Jacobian{n0,n,T,S1,S2}
-#     ∇f::S1           # "raw" Jacobian, not accounting for G
-#     F::S2            # "correct" error Jacobian
-#     G::SizedMatrix{n0,n,T,2}
-#     rmul::Bool
-#     Gt::Transpose{T,SizedMatrix{n0,n,T,2}}
-#     lmul::Bool
-#     tmp::SizedMatrix{n0,n,T,2}
-#     function Jacobian(∇f::J, F::E, G::SizedMatrix{n0,n,T,2}, rmul::Bool) where {n0,n,T,J,E}
-#         if rmul && (size(∇f,2) != n0 || size(∇f,1) != size(F,1) || size(F,2) != n)
-#             throw(DimensionMismatch("$(size(∇f)) × $(size(G)) → $(size(F))"))
-#         end
-#         new{n0,n,T,J,E}(∇f, F, G, rmul)
-#     end
-#     function Jacobian(∇f::J, F::E, G::SizedMatrix{n0,n,T,2}, rmul::Bool,
-#             Gt::Transpose, lmul::Bool) where {n0,n,T,J,E}
-#         if rmul && (size(∇f,2) != n0 || size(F,2) != n)
-#             throw(DimensionMismatch("$(size(Gt)) × $(size(∇f)) × $(size(G)) → $(size(F))"))
-#         elseif lmul && (size(∇f,1) != n0 || size(F,1) != n)
-#             throw(DimensionMismatch("$(size(Gt)) × $(size(∇f)) × $(size(G)) → $(size(F))"))
-#         end
-#         if rmul && lmul
-#             tmp = zero(G)
-#             new{n0,n,T,J,E}(∇f, F, G, rmul, Gt, lmul, tmp)
-#         else
-#             new{n0,n,T,J,E}(∇f, F, G, rmul, Gt, lmul)
-#         end
-#     end
-# end
-#
-# function Jacobian(F, G, rmul::Bool, G2, lmul::Bool)
-#     n,n̄ = size(G)
-#     if rmul && lmul
-#         @assert size(F) == (n̄,n̄)
-#         ∇f = SizedMatrix{n0,n0}(zeros(n0,n0))
-#     elseif rmul
-#         p = size(F,1)
-#         ∇f = SizedMatrix{p,n0}(zeros(p,n0))
-#     elseif lmul
-#         p = size(F,2)
-#         if p == 1
-#             ∇f = SizedVector{n0}(zeros(n0))
-#         else
-#             ∇f = SizedMatrix{n0,p}(zeros(n0,p))
-#         end
-#     else
-#         @assert n0 == n "Cannot skip error expansion if n0 and n are different sizes"
-#         ∇f = F
-#     end
-#     Jacobian(∇f, F, G, rmul, Transpose(G2), lmul)
-# end
-#
-# function Jacobian(F, G, rmul::Bool = G isa UniformScaling)
-#     n0,n = size(G)
-#     if rmul
-#         p = size(F,1)
-#         ∇f = SizedMatrix{p,n0}(zeros(p,n0))
-#     else
-#         @assert n0 == n
-#         ∇f = F
-#     end
-#     Jacobian(∇f, F, G, rmul)
-# end
-#
-# function error_expansion!(jac::Jacobian)
-#     if !jac.lmul && !jac.rmul
-#         return nothing
-#     elseif jac.lmul && jac.rmul
-#         # F = G'∇f*G
-#         mul!(jac.tmp, jac.∇f, jac.G)
-#         mul!(jac.F, jac.Gt, jac.tmp)
-#     elseif jac.rmul
-#         # F = ∇f*G
-#         mul!(jac.F, jac.∇f, jac.G)
-#     elseif jac.lmul
-#         # F = G'∇f
-#         mul!(jac.F, jac.Gt, jac.∇f)
-#     end
-#     return nothing
-# end
-#
-# function build_constraint_jacobians(con::AbstractConstraint, inds, G, useG::Bool)
-#     n0,n = size(G)
-#     p = length(con)
-#     map(inds) do k
-#         C = SizedMatrix{p,n}(zeros(p,n))
-#         Jacobian(C, G[k], useG)
-#     end
-# end
-#
-# function build_constraint_jacobians(con::DynamicsConstraint, inds, G, useG::Bool)
-#     n0,n = size(G)
-#     map(inds) do k
-#         C = SizedMatrix{n,n}(zeros(n,n))
-#         Jacobian(C, G[k], useG, G[k+1], useG)
-#     end
-# end
-#
-# function build_constraint_jacobian_views(D, cinds, zinds, con::AbstractConstraint, inds, G, useG)
-#     n0,n = size(G)
-#     p = length(con)
-#     NN = size(D,2)
-#     N = length(G)
-#     map(enumerate(inds)) do (i,k)
-#         C = view(D,cinds[i],zinds[k])
-#         Jacobian(C, G[k], useG)
-#     end
-# end
-
 @inline get_data(A::AbstractArray) = A
 @inline get_data(A::SizedArray) = A.data
 
@@ -123,7 +14,7 @@ struct ConVal{C,V,M,W}
 	iserr::Bool  # are the Jacobians on the error state
     function ConVal(n::Int, m::Int, con::AbstractConstraint, inds::UnitRange, jac, vals, iserr::Bool=false)
 		if !iserr && size(gen_jacobian(con)) != size(jac[1])
-			throw(DimensionMismatch("size of jac[i] does not match the expected size of $(size(gen_jacobian(con)))"))
+			throw(DimensionMismatch("size of jac[i] $(size(jac[1])) does not match the expected size of $(size(gen_jacobian(con)))"))
 		end
         p = length(con)
         P = length(vals)
@@ -198,6 +89,41 @@ function max_violation!(cval::ConVal)
     end
 end
 
+@inline norm_violation(::Equality, v, p=2) = norm(v,p)
+
+@inline function norm_violation(::Inequality, v, p=2)
+	# TODO: try this with LazyArrays?
+	if p == 1
+		a = zero(eltype(v))
+		for x in v
+			a += max(x,0)
+		end
+		return a
+	elseif p == 2
+		a = zero(eltype(v))
+		for x in v
+			a += max(x, 0)^2
+		end
+		return sqrt(a)
+	elseif p == Inf
+		return maximum(v)
+	else
+		throw(ArgumentError("$p is not a valid norm value. Must be 1,2 or Inf"))
+	end
+end
+
+function norm_violation(cval::ConVal, p=2)
+	norm_violation!(cval, p)
+	return norm(cval.c_max, p)
+end
+
+function norm_violation!(cval::ConVal, p=2)
+	s = sense(cval.con)
+	for i in eachindex(cval.inds)
+		cval.c_max[i] = norm_violation(s, cval.vals[i], p)
+	end
+end
+
 function error_expansion!(errval::ConVal, conval::ConVal, model::AbstractModel, G)
 	if errval.jac !== conval.jac
 		for (i,k) in enumerate(conval.inds)
@@ -223,17 +149,47 @@ end
 function gen_convals(D::AbstractMatrix, d::AbstractVector, cinds, zinds, con::AbstractConstraint, inds)
     P = length(inds)
     p = length(con)
-    ws = widths(contype(con), n, m)
-    C = [view(D, cinds[i], zinds[k,j]) for i in 1:P, j = 1:length(ws)]
+	n,m = get_dims(con, length(zinds[1]))
+    ws = widths(con, n, m)
+
+    C = [begin
+		view(D, cinds[i], zinds[k+(j-1)][1:ws[j]])
+	end for (i,k) in enumerate(inds), j = 1:length(ws)]
     c = [view(d, cinds[i]) for i in 1:P]
     return C,c
 end
 
-function gen_convals(blocks::Vector, Yinds, yinds, con::AbstractConstraint, inds)
-    C = map(enumerate(inds)) do (i,k)
-        nm = size(blocks[k].Y)
-        view(blocks[k], cinds[i], 1:nm)
+function gen_convals(blocks::Vector, cinds, con::AbstractConstraint, inds)
+	# assumes all cinds are contiguous indices (i.e. can be represented as a UnitRange)
+    C1 = map(enumerate(inds)) do (i,k)
+        nm = size(blocks[k].Y,2)
+		if con isa StateConstraint
+			iz = 1:width(con)
+		elseif con isa ControlConstraint
+			m = control_dim(con)
+			n = nm - m
+			iz = n .+ (1:m)
+		else
+			iz = 1:nm
+		end
+		ic = cinds[i][1]:cinds[i][end]
+		n1 = size(blocks[k].D2, 1)
+        view(blocks[k].Y, n1 .+ (ic), iz)
     end
-    c = [view(blocks[k].y, yinds[i]) for (i,k) in enumerate(inds)]
+	C2 = map(enumerate(inds)) do (i,k)
+		if con isa StageConstraint
+			w = size(blocks[k].Y,2)
+			view(blocks[k].Y,1:0,1:w)
+		else
+			w = size(blocks[k+1].Y,2)
+			n = state_dim(con)
+			view(blocks[k+1].Y,1:n,1:w)
+		end
+	end
+	C = [C1 C2]
+    c = map(enumerate(inds)) do (i,k)
+		ic = cinds[i][1]:cinds[i][end]
+        view(blocks[k].y, ic)
+    end
     return C,c
 end

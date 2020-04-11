@@ -55,17 +55,17 @@ function ALConstraintSet(cons::ConstraintList, model::AbstractModel)
     μ_max = zeros(ncon)
     μ_maxes = [zeros(length(ind)) for ind in cons.inds]
 	params = [ConstraintParams() for con in cons.constraints]
-    ALConstraintSet(convals, errvals, λ, μ, a, c_max, μ_max, μ_maxes, params, cons.p)
+    ALConstraintSet(convals, errvals, λ, μ, a, c_max, μ_max, μ_maxes, params, copy(cons.p))
 end
 
 @inline ALConstraintSet(prob::Problem) = ALConstraintSet(prob.constraints, prob.model)
 
 # Iteration
 Base.iterate(conSet::ALConstraintSet) =
-	isempty(conSet.convals) ? nothing : (conSet.convals[1].con,1)
+	isempty(get_convals(conSet)) ? nothing : (get_convals(conSet)[1].con,1)
 Base.iterate(conSet::ALConstraintSet, state::Int) =
-	state >= length(conSet) ? nothing : (conSet.convals[state+1].con, state+1)
-@inline Base.length(conSet) = length(conSet.convals)
+	state >= length(conSet) ? nothing : (get_convals(conSet)[state+1].con, state+1)
+@inline Base.length(conSet) = length(get_convals(conSet))
 Base.IteratorSize(::ALConstraintSet) = Base.HasLength()
 Base.IteratorEltype(::ALConstraintSet) = Base.HasEltype()
 Base.eltype(::ALConstraintSet) = AbstractConstraint
@@ -98,43 +98,67 @@ function link_constraints!(set1::ALConstraintSet, set2::ALConstraintSet)
 	return links
 end
 
+
+@inline get_convals(conSet::ALConstraintSet) = conSet.convals
+@inline get_errvals(conSet::ALConstraintSet) = conSet.errvals
+
 # Constraint Evaluation
-function evaluate!(conSet::ALConstraintSet, Z::Traj)
-    for conval in conSet.convals
+function evaluate!(conSet::AbstractConstraintSet, Z::Traj)
+    for conval in get_convals(conSet)
         evaluate!(conval, Z)
     end
 end
 
-function jacobian!(conSet::ALConstraintSet, Z::Traj)
-    for conval in conSet.convals
+function jacobian!(conSet::AbstractConstraintSet, Z::Traj)
+    for conval in get_convals(conSet)
         jacobian!(conval, Z)
     end
 end
 
-function error_expansion!(conSet::ALConstraintSet, model::AbstractModel, G)
-	@assert conSet.errvals === conSet.convals
+function error_expansion!(conSet::AbstractConstraintSet, model::AbstractModel, G)
+	@assert get_convals(conSet) == get_errvals(conSet)
 	return nothing
 end
 
-function error_expansion!(conSet::ALConstraintSet, model::LieGroupModel, G)
-	for i in eachindex(conSet.errvals)
-		error_expansion!(conSet.errvals[i], conSet.convals[i], model, G)
+function error_expansion!(conSet::AbstractConstraintSet, model::LieGroupModel, G)
+	convals = get_convals(conSet)
+	errvals = get_errvals(conSet)
+	for i in eachindex(errvals)
+		error_expansion!(errvals[i], convals[i], model, G)
 	end
 end
 
 # Max values
-function max_violation(conSet::ALConstraintSet{T}) where T
+function max_violation(conSet::AbstractConstraintSet)
 	max_violation!(conSet)
     return maximum(conSet.c_max)
 end
 
-function max_violation!(conSet::ALConstraintSet{T}) where T
-    for i in eachindex(conSet.convals)
-        max_violation!(conSet.convals[i])
-        conSet.c_max[i] = maximum(conSet.convals[i].c_max::Vector{T})
+function max_violation!(conSet::AbstractConstraintSet)
+	convals = get_convals(conSet)
+	T = eltype(conSet.c_max)
+    for i in eachindex(convals)
+        max_violation!(convals[i])
+        conSet.c_max[i] = maximum(convals[i].c_max::Vector{T})
     end
 	return nothing
 end
+
+function norm_violation(conSet::AbstractConstraintSet, p=2)
+	norm_violation!(conSet, p)
+	norm(conSet.c_max, p)
+end
+
+function norm_violation!(conSet::AbstractConstraintSet, p=2)
+	convals = get_convals(conSet)
+	T = eltype(conSet.c_max)
+	for i in eachindex(convals)
+		norm_violation!(convals[i], p)
+		c_max = convals[i].c_max::Vector{T}
+		conSet.c_max[i] = norm(c_max, p)
+	end
+end
+
 
 function max_penalty!(conSet::ALConstraintSet{T}) where T
     conSet.c_max .*= 0
@@ -152,13 +176,14 @@ function max_penalty!(μ_max::Vector{<:Real}, μ::Vector{<:StaticVector})
     return nothing
 end
 
-function findmax_violation(conSet::ALConstraintSet)
+function findmax_violation(conSet::AbstractConstraintSet)
 	max_violation!(conSet)
 	c_max0, j_con = findmax(conSet.c_max) # which constraint
 	if c_max0 < eps()
 		return "No constraints violated"
 	end
-	conval = conSet.convals[j_con]
+	convals = get_convals(conSet)
+	conval = convals[j_con]
 	i_con = findmax(conval.c_max)[2]  # whicn index
 	k_con = conval.inds[i_con] # time step
 	con_sense = sense(conval.con)

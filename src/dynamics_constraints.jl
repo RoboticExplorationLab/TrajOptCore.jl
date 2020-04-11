@@ -59,7 +59,16 @@ end
 @inline DynamicsConstraint(model, N) = DynamicsConstraint{DEFAULT_Q}(model, N)
 integration(::DynamicsConstraint{Q}) where Q = Q
 
-widths(con::DynamicsConstraint{<:Any,<:Any,<:Any,<:Any,NM}) where {N,M,NM} = (NM,NM)
+widths(con::DynamicsConstraint{<:Any,<:Any,N,M,NM},n::Int=N,m::Int=M) where {N,M,NM} = (NM,NM)
+widths(con::DynamicsConstraint{<:Explicit,<:Any,N,M,NM},n::Int=N,m::Int=M) where {N,M,NM} = (NM,N)
+
+function gen_views(∇c::AbstractMatrix, con::DynamicsConstraint{<:Explicit}, n=state_dim(con), m=control_dim(con))
+	if size(∇c,2) == n  # handle last Jacobian which is smaller
+		view(∇c,:,1:n), view(∇c,:,n:n-1)
+	else
+		view(∇c,:,1:n), view(∇c,:,n .+ (1:m))
+	end
+end
 # width(con::DynamicsConstraint{<:Implicit,L,T,N,M,NM}) where {L,T,N,M,NM} = 2N+M
 # width(con::DynamicsConstraint{<:Explicit,L,T,N,M,NM}) where {L,T,N,M,NM} = 2NM
 ####!

@@ -18,9 +18,171 @@ abstract type CostFunction end
 
 abstract type QuadraticCostFunction{n,m,T} <: CostFunction end
 
-@inline QuadraticCostFunction(cost::QuadraticCostFunction) = cost
-@inline QuadraticCostFunction(cost::CostFunction) =
-    QuadraticCost{Float64}(state_dim(cost), control_dim(cost))
+function (::Type{QC})(Q::AbstractMatrix, R::AbstractMatrix;
+        H=SizedMatrix{size(R,1),size(Q,1)}(zeros(size(R,1),size(Q,1))),
+        q=(@MVector zeros(size(Q,1))),
+        r=(@MVector zeros(size(R,1))),
+        c=zero(eltype(Q)),
+        terminal::Bool=false,
+        checks::Bool=true) where QC<:QuadraticCostFunction
+    eval(nameof(QC))(Q, R, H, q, r, c, terminal=terminal, checks=checks)
+end
+
+function (::Type{QC})(Q::AbstractVector, R::AbstractVector;
+        H=SizedMatrix{size(R,1),size(Q,1)}(zeros(size(R,1),size(Q,1))),
+        q=(@MVector zeros(size(Q,1))),
+        r=(@MVector zeros(size(R,1))),
+        c=zero(eltype(Q)),
+        terminal::Bool=false,
+        checks::Bool=true) where QC<:QuadraticCostFunction
+    eval(nameof(QC))(Diagonal(Q), Diagonal(R), H, q, r, c, terminal=terminal, checks=checks)
+end
+
+"""
+$(SIGNATURES)
+Cost function of the form
+``(x-x_f)^T Q (x_x_f) + u^T R u``
+R must be positive definite, Q must be positive semidefinite
+"""
+function LQRCost(Q::AbstractArray, R::AbstractArray,
+        xf::AbstractVector, uf=(@SVector zeros(size(R,1))); checks=true)
+    n = length(xf)
+    m = length(uf)
+    H = SizedMatrix{m,n}(zeros(m,n))
+    q = -Q*xf
+    r = -R*uf
+    c = 0.5*xf'*Q*xf + 0.5*uf'R*uf
+    return QuadraticCost(Q, R, H, q, r, c, checks=checks, terminal=false)
+end
+
+function LQRCost(Q::Diagonal, R::Diagonal,
+        xf::AbstractVector, uf=(@SVector zeros(size(R,1))))
+    q = -Q*xf
+    r = -R*uf
+    c = 0.5*xf'*Q*xf + 0.5*uf'R*uf
+    return DiagonalCost(Q, R, q=q, r=r, c=c, terminal=false)
+end
+
+function run_posdef_checks(Q, R)
+    valid = true
+    if !isposdef(Array(R))
+        @warn "R is not positive definite"
+        valid &= false
+    end
+    if !ispossemidef(Array(Q))
+        @warn "Q must be positive semi-definite"
+        valid &= false
+    end
+    return valid
+end
+
+@inline state_dim(cost::QuadraticCostFunction{n}) where n = n
+@inline control_dim(cost::QuadraticCostFunction{<:Any,m}) where m = m
+is_diag(cost::QuadraticCostFunction) = is_blockdiag(cost) && cost.Q isa Diagonal && cost.R isa Diagonal
+
+function stage_cost(cost::QuadraticCostFunction, x::AbstractVector, u::AbstractVector)
+    J = stage_cost(cost, x) .+ 0.5*u'cost.R'u .+ dot(cost.r,u)
+    if !is_blockdiag(cost)
+        J += u'cost.H*x
+    end
+end
+
+function stage_cost(cost::QuadraticCostFunction, x::AbstractVector)
+    0.5*x'cost.Q*x .+ dot(cost.q,x) .+ cost.c
+end
+
+function gradient!(E, cost::QuadraticCostFunction, x, u)
+    E.q .= cost.Q*x .+ cost.q
+    E.r .= cost.R*u .+ cost.r
+    if !is_blockdiag(cost)
+        E.q .+= cost.H'u
+        E.r .+= cost.H*x
+    end
+    return false
+end
+
+function hessian!(E, cost::QuadraticCostFunction, x, u)
+    if cost.Q isa Diagonal
+        for i = 1:length(x)
+            E.Q[i,i] = cost.Q[i,i]
+        end
+    else
+        E.Q .= cost.Q
+    end
+    if cost.R isa Diagonal
+        for i = 1:length(u)
+            E.R[i,i] = cost.R[i,i]
+        end
+    else
+        E.R .= cost.R
+    end
+    if !is_blockdiag(cost)
+        E.H .= cost.H
+    end
+    return true
+end
+
+function Base.copy(c::QC) where QC<:QuadraticCostFunction
+    QC(copy(c.Q), copy(c.R), H=copy(c.H), q=copy(c.q), r=copy(c.r), c=c.c,
+        terminal=c.terminal, checks=false)
+end
+
+
+# Additional Methods
+Base.promote_rule(::Type{<:QuadraticCostFunction}, ::Type{<:QuadraticCostFunction}) = QuadraticCost
+
+function +(c1::QuadraticCostFunction, c2::QuadraticCostFunction)
+    @assert state_dim(c1) == state_dim(c2)
+    @assert control_dim(c1) == control_dim(c2)
+    QuadraticCost(c1.Q + c2.Q, c1.R + c2.R, c1.H + c2.H,
+                  c1.q + c2.q, c1.r + c2.r, c1.c + c2.c,
+                  checks=false, terminal=c1.terminal && c2.terminal)
+end
+#
+# function LinearAlgebra.inv(cost::QC) where QC <: QuadraticCostFunction
+#     if is_blockdiag(cost)
+#         QuadraticCost(inv(cost.Q), inv(cost.R), cost.H, cost.q, cost.r, cost.c,
+#             checks=false, terminal=cost.terminal)
+#     else
+#         m,n = size(cost.H)
+#         H1 = [cost.Q cost.H']
+#         H2 = [cost.H cost.R ]
+#         H = [H1; H2]
+#         Hinv = inv(H)
+#         ix = 1:n
+#         iu = n .+ (1:m)
+#         Q = SizedMatrix{n,n}(Hinv[ix, ix])
+#         R = SizedMatrix{m,m}(Hinv[iu, iu])
+#         H = SizedMatrix{m,n}(Hinv[iu, ix])
+#         QC(Q,R,H, cost.q, cost.r, cost.c,
+#             checks=false, terminal=cost.terminal)
+#     end
+# end
+#
+#
+# raw"""
+# Solve the system
+# ``\begin{bmatrix} Q & H \\ H^T R \end{bmatrix} \begin{bmatrix} x \\ u \end{bmatrix}
+#     = \begin{bmatrix} c \\ d \end{bmatrix}``
+# Efficient and non-allocating since the cost stores the required matrix inverses, and uses
+# the Shur compliment in the case H is non-zero.
+#
+# Returns a `StaticKnotPoint` with the solution
+# """
+# function Base.:\(cost::QuadraticCostFunction, z::AbstractKnotPoint)
+#     Qinv,Rinv,H = cost.Qinv, cost.Rinv, cost.H
+#     c = state(z)
+#     d = control(z)
+#     if cost.zeroH
+#         x = Qinv*c
+#         u = Rinv*d
+#     else
+#         x = cost.Sinv*(c - H*(Rinv*d))
+#         u = Rinv*(d - H'x)
+#     end
+#     return StaticKnotPoint([x;u], z._x, z._u, z.dt, z.t)
+# end
+
 
 #######################################################
 #              COST FUNCTION INTERFACE                #
@@ -33,85 +195,29 @@ struct DiagonalCost{n,m,T} <: QuadraticCostFunction{n,m,T}
     r::SVector{m,T}
     c::T
     terminal::Bool
-    function DiagonalCost(Qd::StaticVector{n}, Rd::StaticVector{m},
-                          q::StaticVector{n},  r::StaticVector{m},
-                          c::Real, terminal::Bool=false) where {n,m}
-        T = promote_type(typeof(c), eltype(Qd), eltype(Rd), eltype(q), eltype(r))
-        new{n,m,T}(Diagonal(SVector(Qd)), Diagonal(SVector(Rd)), SVector(q), SVector(r),
-            T(c), terminal)
+    function DiagonalCost(Q::Diagonal, R::Diagonal,
+                          q::AbstractVector,  r::AbstractVector,
+                          c::Real; checks::Bool=true, terminal::Bool=false)
+        n,m = length(q), length(r)
+        T = promote_type(typeof(c), eltype(Q), eltype(R), eltype(q), eltype(r))
+        if checks
+            run_posdef_checks(Q, R)
+        end
+        new{n,m,T}(Diagonal(SVector{n}(diag(Q))),
+                   Diagonal(SVector{m}(diag(R))),
+                   SVector{n}(q), SVector{m}(r), c, terminal)
     end
 end
 
-function DiagonalCost(Q::Diagonal{T,<:StaticVector{n}},R::Diagonal{T,<:StaticVector{m}},
-        q=(@SVector zeros(T,n)), r=(@SVector zeros(T,m)), c=zero(T), terminal=false) where {T,n,m}
-    DiagonalCost(diag(Q), diag(R), q, r, c, terminal)
-end
+DiagonalCost(Q::Diagonal, R::Diagonal, H, q, r, c; checks=false, terminal=false) =
+    DiagonalCost(Q, R, q, r, c, checks=checks, terminal=terminal)
 
-function DiagonalCost(Q::AbstractVector, R::AbstractVector,
-        q::AbstractVector, r::AbstractVector, c=0.0, terminal=false)
-    n,m = length(Q), length(R)
-    Q = SVector{n}(Q)
-    R = SVector{m}(R)
-    q = SVector{n}(q)
-    r = SVector{m}(r)
-    DiagonalCost(Q, R, q, r, c, terminal)
-end
+is_blockdiag(::DiagonalCost) = true
+is_diag(::DiagonalCost) = true
 
-function DiagonalCost(Q::AbstractVector, R::AbstractVector, terminal=false)
-    n,m = length(Q), length(R)
-    q = @SVector zeros(n)
-    r = @SVector zeros(m)
-    c = zero(eltype(Q))
-    DiagonalCost(Q, R, q, r, c, terminal)
-end
-
-state_dim(::DiagonalCost{n}) where n = n
-control_dim(::DiagonalCost{<:Any,m}) where m = m
-
-function stage_cost(cost::DiagonalCost, x::SVector, u::SVector)
-    return cost.r'u + 0.5*u'cost.R*u + stage_cost(cost, x)
-end
-
-function stage_cost(cost::DiagonalCost, x::SVector)
-    return 0.5*x'cost.Q*x + cost.q'x + cost.c
-end
-
-function gradient!(E::QuadraticCostFunction, cost::DiagonalCost, x, u)
-    E.q .= cost.Q*x .+ cost.q
-    E.r .= cost.R*u .+ cost.r
-    return false
-end
-
-function hessian!(E::QuadraticCostFunction, cost::DiagonalCost, x, u)
-    for i = 1:length(x)
-        E.Q[i,i] = cost.Q[i,i]
-    end
-    for i = 1:length(u)
-        E.R[i,i] = cost.R[i,i]
-    end
-    return true
-end
-
-function Base.copy(cost::DiagonalCost)
-    DiagonalCost(copy(cost.Q), copy(cost.R), copy(cost.q), copy(cost.r), cost.c, cost.terminal)
-end
-
-function LinearAlgebra.inv(cost::DiagonalCost)
-    return DiagonalCost(inv(cost.Q), inv(cost.R), cost.q, cost.r, cost.c, cost.terminal)
-end
-
-function Base.:\(cost::DiagonalCost, z::AbstractKnotPoint)
-    x = cost.Q\state(z)
-    u = cost.R\control(z)
-    return StaticKnotPoint([x;u], z._x, z._u, z.dt, z.t)
-end
-
-function Base.:+(cost1::DiagonalCost, cost2::DiagonalCost)
-    @assert state_dim(cost1) == state_dim(cost2)
-    @assert control_dim(cost1) == control_dim(cost2)
-    terminal = cost1.terminal || cost2.terminal
-    DiagonalCost(cost1.Q + cost2.Q, cost1.R + cost2.R, cost1.q + cost2.q, cost1.r + cost2.r,
-        cost1.c + cost2.c, terminal)
+function Base.copy(c::DiagonalCost)
+    DiagonalCost(copy(c.Q), copy(c.R), q=copy(c.q), r=copy(c.r), c=c.c,
+        terminal=c.terminal, checks=false)
 end
 
 function change_dimension(cost::DiagonalCost, n::Int, m::Int, ix, iu)
@@ -140,7 +246,7 @@ QuadraticCost(Q, q, c)
 ```
 Any optional or omitted values will be set to zero(s).
 """
-mutable struct QuadraticCost{n,m,T,TQ,TR} <: QuadraticCostFunction{n,m,T}
+struct QuadraticCost{n,m,T,TQ,TR} <: QuadraticCostFunction{n,m,T}
     Q::TQ                     # Quadratic stage cost for states (n,n)
     R::TR                     # Quadratic stage cost for controls (m,m)
     H::SizedMatrix{m,n,T,2}   # Quadratic Cross-coupling for state and controls (m,n)
@@ -149,59 +255,23 @@ mutable struct QuadraticCost{n,m,T,TQ,TR} <: QuadraticCostFunction{n,m,T}
     c::T                      # constant term
     terminal::Bool
     zeroH::Bool
-    # Qinv::TQ
-    # Rinv::TR
-    # Sinv::SizedMatrix{n,n,T,2}
-    # Jinv::SizedMatrix{nm,nm,T,2}
-    function QuadraticCost(Q::TQ, R::TR, H::TH,
-            q::Tq, r::Tr, c::T; checks=true, terminal=false) where {TQ,TR,TH,Tq,Tr,T}
-        @assert size(Q,1) == length(q)
-        @assert size(R,1) == length(r)
-        @assert size(H) == (length(r), length(q))
-        if checks
-            if !isposdef(Array(R))
-                @warn "R is not positive definite"
-            end
-            if !ispossemidef(Array(Q))
-                err = ArgumentError("Q must be positive semi-definite")
-                throw(err)
-            end
-        end
+    function QuadraticCost(Q::AbstractMatrix, R::AbstractMatrix, H::AbstractMatrix,
+            q::AbstractVector, r::AbstractVector, c::Real; checks=true, terminal=false)
+        n,m = length(q), length(r)
+        @assert size(Q,1) == n
+        @assert size(R,1) == m
+        @assert size(H) == (m,n)
         zeroH = norm(H,Inf) ≈ 0
         m,n = size(H)
-        new{n,m,T,TQ,TR}(Q,R,H,q,r,c,terminal,zeroH)
-        # Qinv = inv(Q)
-        # Rinv = inv(R)
-        # if zeroH
-        #     new{n,m,T,TQ,TR}(Q,R,H,q,r,c,terminal,zeroH,Qinv,Rinv)
-        # else
-        #     Sinv = inv(Q - H*Rinv*H')  # store Shur compliment inverse
-        #     new{n,m,T,TQ,TR}(Q,R,H,q,r,c,terminal,zeroH,Qinv,Rinv,Sinv)
-        # end
+        T = promote_type(eltype(Q), eltype(R), eltype(H), eltype(q), eltype(r), typeof(c))
+        new{n,m,T,typeof(Q),typeof(R)}(Q, R, SizedMatrix{m,n}(H), MVector{n}(q),MVector{m}(r),c,
+            terminal, zeroH)
     end
 end
 
 state_dim(cost::QuadraticCost) = length(cost.q)
 control_dim(cost::QuadraticCost) = length(cost.r)
-
-# Constructors
-function QuadraticCost(Q,R; H=similar(Q,size(R,1), size(Q,1))*0, q=zeros(size(Q,1)),
-        r=zeros(size(R,1)), c=0.0, checks=true, terminal=false)
-    QuadraticCost(Q,R,H,q,r,c, checks=checks, terminal=terminal)
-end
-
-function QuadraticCost(Q::Union{Diagonal{T,StaticVector{N,T}}, SMatrix{N,N,T}},
-            R::Union{Diagonal{T,StaticVector{M,T}}, SMatrix{M,M,T}};
-            H=SizedMatrix{M,N}(zeros(T,M,N)),
-            q=(@SVector zeros(T,N)),
-            r=(@SVector zeros(M)),
-            c=0.0, checks=true, terminal=false) where {T,N,M}
-    QuadraticCost(Q,R,H,q,r,c, checks=checks, terminal=terminal)
-end
-
-function QuadraticCost(Q,q,c; checks=true)
-    QuadraticCost(Q,zeros(0,0),zeros(0,size(Q,1)),q,zeros(0),c,checks=checks, terminal=true)
-end
+is_blockdiag(cost::QuadraticCost) = cost.zeroH
 
 function QuadraticCost{T}(n::Int,m::Int) where T
     Q = SizedMatrix{n,n}(Matrix(one(Float64)*I,n,n))
@@ -213,145 +283,6 @@ function QuadraticCost{T}(n::Int,m::Int) where T
     QuadraticCost(Q,R,H,q,r,c, checks=false, terminal=false)
 end
 
-"""
-$(SIGNATURES)
-Cost function of the form
-``(x-x_f)^T Q (x_x_f) + u^T R u``
-R must be positive definite, Q must be positive semidefinite
-"""
-function LQRCost(Q::AbstractArray, R::AbstractArray,
-        xf::AbstractVector, uf=(@SVector zeros(size(R,1))); checks=true)
-    H = @SMatrix zeros(size(R,1),size(Q,1))
-    q = -Q*xf
-    r = -R*uf
-    c = 0.5*xf'*Q*xf + 0.5*uf'R*uf
-    return QuadraticCost(Q, R, H, q, r, c, checks=checks, terminal=false)
-end
-
-function LQRCost(Q::Diagonal{<:Any,<:SVector{n}},R::Diagonal{<:Any,<:SVector{m}},
-        xf::AbstractVector, uf=(@SVector zeros(m))) where {n,m}
-    q = -Q*xf
-    r = -R*uf
-    c = 0.5*xf'*Q*xf + 0.5*uf'R*uf
-    return DiagonalCost(Q, R, q, r, c, false)
-end
-
-"""
-$(SIGNATURES)
-Cost function of the form
-``(x-x_f)^T Q (x-x_f)``
-Q must be positive semidefinite
-"""
-function LQRCostTerminal(Qf::AbstractArray,xf::AbstractVector)
-    qf = -Qf*xf
-    cf = 0.5*xf'*Qf*xf
-    return QuadraticCost(Qf,zeros(0,0),zeros(0,size(Qf,1)),qf,zeros(0),cf,true)
-end
-
-# Cost function methods
-function stage_cost(cost::QuadraticCost, x::AbstractVector, u::AbstractVector)
-    0.5*x'cost.Q*x .+ 0.5*u'*cost.R*u .+ cost.q'x .+ cost.r'u .+ cost.c .+ u'*cost.H*x
-end
-
-function stage_cost(cost::QuadraticCost, xN::AbstractVector{T}) where T
-    0.5*xN'cost.Q*xN .+ cost.q'*xN .+ cost.c
-end
-
-function gradient!(E::QuadraticCost, cost::QuadraticCost, x, u)
-    E.q .= cost.Q*x .+ cost.q .+ cost.H'u
-    E.r .= cost.R*u .+ cost.r .+ cost.H*x
-    return false
-end
-
-function hessian!(E::QuadraticCost{<:Any,<:Any,<:Any,TQ,TR}, cost::QuadraticCost, x, u) where {TQ,TR}
-    if TQ <: Diagonal
-        for i = 1:length(x)
-            E.Q[i,i] = cost.Q[i,i]
-        end
-    else
-        E.Q .= cost.Q
-    end
-    if TR <: Diagonal
-        for i = 1:length(u)
-            E.R[i,i] = cost.R[i,i]
-        end
-    else
-        E.R .= cost.R
-    end
-    if !cost.zeroH
-        E.H .= cost.H
-    end
-    return true
-end
-
-
-# Additional Methods
-# function Base.show(io::IO, cost::QuadraticCost)
-#     print(io, "QuadraticCost{...}")
-# end
-
-function LinearAlgebra.inv(cost::QuadraticCost)
-    if norm(cost.H,Inf) ≈ 0
-        QuadraticCost(inv(cost.Q), inv(cost.R), cost.H, cost.q, cost.r, cost.c,
-            checks=false, terminal=cost.terminal)
-    else
-        m,n = size(cost.H)
-        H1 = [cost.Q cost.H']
-        H2 = [cost.H cost.R ]
-        H = [H1; H2]
-        Hinv = inv(H)
-        ix = 1:n
-        iu = n .+ (1:m)
-        Q = SizedMatrix{n,n}(Hinv[ix, ix])
-        R = SizedMatrix{m,m}(Hinv[iu, iu])
-        H = SizedMatrix{m,n}(Hinv[iu, ix])
-        QuadraticCost(Q,R,H, cost.q, cost.r, cost.c,
-            checks=false, terminal=cost.terminal)
-    end
-end
-
-raw"""
-Solve the system
-``\begin{bmatrix} Q & H \\ H^T R \end{bmatrix} \begin{bmatrix} x \\ u \end{bmatrix}
-    = \begin{bmatrix} c \\ d \end{bmatrix}``
-Efficient and non-allocating since the cost stores the required matrix inverses, and uses
-the Shur compliment in the case H is non-zero.
-
-Returns a `StaticKnotPoint` with the solution
-"""
-function Base.:\(cost::QuadraticCost, z::AbstractKnotPoint)
-    Qinv,Rinv,H = cost.Qinv, cost.Rinv, cost.H
-    c = state(z)
-    d = control(z)
-    if cost.zeroH
-        x = Qinv*c
-        u = Rinv*d
-    else
-        x = cost.Sinv*(c - H*(Rinv*d))
-        u = Rinv*(d - H'x)
-    end
-    return StaticKnotPoint([x;u], z._x, z._u, z.dt, z.t)
-end
-
-"Add two Quadratic costs of the same size"
-function +(c1::QuadraticCost, c2::QuadraticCost)
-    @assert state_dim(c1) == state_dim(c2)
-    @assert control_dim(c1) == control_dim(c2)
-    QuadraticCost(c1.Q + c2.Q, c1.R + c2.R, c1.H + c2.H,
-                  c1.q + c2.q, c1.r + c2.r, c1.c + c2.c)
-end
-
-function +(c1::DiagonalCost, c2::QuadraticCost)
-    @assert state_dim(c1) == state_dim(c2)
-    @assert control_dim(c1) == control_dim(c2)
-    QuadraticCost(c1.Q + c2.Q, c1.R + c2.R, c2.H,
-                  c1.q + c2.q, c1.r + c2.r, c1.c + c2.c)
-end
-@inline +(c1::QuadraticCost, c2::DiagonalCost) = c2+c1
-
-function copy(cost::QuadraticCost)
-    return QuadraticCost(copy(cost.Q), copy(cost.R), copy(cost.H), copy(cost.q), copy(cost.r), copy(cost.c))
-end
 
 
 

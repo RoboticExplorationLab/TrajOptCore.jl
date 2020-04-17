@@ -79,8 +79,3 @@ q2 = copy(qcost)
 @test q2.q !== qcost.q
 
 qcost = LQRCost(Q,R,xf)
-
-E = QuadraticCost{Float64}(n,m)
-@btime TrajOptCore.stage_cost($qcost, $x, $u)
-@btime TrajOptCore.gradient!($E, $qcost, $x, $u)
-@btime TrajOptCore.hessian!($E, $qcost, $x, $u)

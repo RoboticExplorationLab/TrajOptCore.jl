@@ -19,8 +19,8 @@ end
 cost(obj, dyn_con::DynamicsConstraint{Q}, Z) where Q<:QuadratureRule = cost(obj, Z)
 
 "Evaluate the cost for a trajectory (non-allocating)"
-@inline function cost!(obj::Objective, Z::Traj)
-    map!(stage_cost, obj.J, obj.cost, Z)
+@inline function cost!(obj::Objective, Z::Traj, J=obj.J)
+    map!(stage_cost, J, obj.cost, Z)
 end
 
 
@@ -33,7 +33,11 @@ function cost_gradient!(E::Objective, obj::Objective, Z::Traj, init::Bool=false)
     N = length(Z)
     for k in eachindex(Z)
         if init || !is_const[k]
-            is_const[k] = gradient!(E.cost[k], obj.cost[k], state(Z[k]), control(Z[k]))
+			if is_terminal(Z[k])
+            	is_const[k] = gradient!(E.cost[k], obj.cost[k], state(Z[k]))
+			else
+            	is_const[k] = gradient!(E.cost[k], obj.cost[k], state(Z[k]), control(Z[k]))
+			end
             dt_x = k < N ? Z[k].dt :  one(Z[k].dt)
             dt_u = k < N ? Z[k].dt : zero(Z[k].dt)
             E[k].q .*= dt_x
@@ -47,14 +51,18 @@ function cost_hessian!(E::Objective{C}, obj::Objective, Z::Traj, init::Bool=fals
     N = length(Z)
     for k in eachindex(Z)
         if init || !is_const[k]
-            is_const[k] = hessian!(E.cost[k], obj.cost[k], state(Z[k]), control(Z[k]))
+			if is_terminal(Z[k])
+            	is_const[k] = hessian!(E.cost[k], obj.cost[k], state(Z[k]))
+			else
+            	is_const[k] = hessian!(E.cost[k], obj.cost[k], state(Z[k]), control(Z[k]))
+			end
             dt_x = k < N ? Z[k].dt :  one(Z[k].dt)
             dt_u = k < N ? Z[k].dt : zero(Z[k].dt)
             E[k].Q .*= dt_x
             E[k].R .*= dt_u
-			if C isa QuadraticCost
-            	E[k].H .*= dt_u
-			end
+			# if C isa QuadraticCost
+            # 	E[k].H .*= dt_u
+			# end
         end
     end
 end
@@ -114,6 +122,23 @@ end
 function static_expansion(cost::QuadraticCost)
 	StaticExpansion(cost.q, cost.Q, cost.r, cost.R, cost.H)
 end
+
+"""
+	dgrad(E::QuadraticExpansion, dZ::Traj)
+
+Calculate the derivative of the cost in the direction of `dZ`, where `E` is the current
+quadratic expansion of the cost.
+"""
+function dgrad(E::QuadraticExpansion{n,m,T}, dZ::Traj)::T where {n,m,T}
+	g = zero(T)
+	N = length(E)
+	for k = 1:N-1
+		g += dot(E[k].q, state(dZ[k])) + dot(E[k].r, control(dZ[k]))
+	end
+	g += dot(E[N].q, state(dZ[N]))
+	return g
+end
+
 
 # # In-place cost-expansion
 # function cost_expansion!(E::AbstractExpansion, cost::CostFunction, z::KnotPoint)

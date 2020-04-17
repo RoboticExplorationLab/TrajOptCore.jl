@@ -95,11 +95,7 @@ function QuadraticObjective(obj::AbstractObjective)
 end
 
 function QuadraticObjective(n::Int, m::Int, N::Int)
-    costfun = QuadraticCost{Float64}(n,m)
-    obj = Objective([copy(costfun) for k = 1:N])
-    obj.cost[end] = QuadraticCost(costfun.Q, costfun.R, costfun.H, costfun.q, costfun.r,
-        costfun.c; checks=false, terminal=true)
-    obj
+    obj = Objective([QuadraticCost{Float64}(n,m,terminal=(k==N)) for k = 1:N])
 end
 
 function build_cost_expansion(obj::Objective{<:DiagonalCostFunction}, model::AbstractModel)
@@ -170,20 +166,21 @@ function LQRObjective(Q::AbstractArray, R::AbstractArray, Qf::AbstractArray,
 end
 
 function LQRObjective(
-        Q::Union{Diagonal{T,<:SVector{n}},SMatrix{n,n}},
-        R::Union{Diagonal{T,<:SVector{m}},SMatrix{m,m}},
+        Q::Diagonal,
+        R::Diagonal,
         Qf::AbstractArray, xf::AbstractVector, N::Int;
-        uf=(@SVector zeros(m)),
-        checks=true) where {T,n,m}
+        uf=(@SVector zeros(size(R,1))),
+        checks=true)
+    n,m = size(Q,1), size(R,1)
     q = -Q*xf
     r = -R*uf
     c = 0.5*xf'*Q*xf + 0.5*uf'R*uf
     qf = -Qf*xf
     cf = 0.5*xf'*Qf*xf
 
-    ℓ = DiagonalCost(Q, R, q, r, c, false)
+    ℓ = DiagonalCost(Q, R, q=q, r=r, c=c, terminal=false)
 
-    ℓN = DiagonalCost(Qf, R*0, qf, r*0, cf, true)
+    ℓN = DiagonalCost(Qf, R*0, q=qf, c=cf, terminal=true, checks=false)
 
     obj = Objective(ℓ, ℓN, N)
 end

@@ -85,14 +85,20 @@ function stage_cost(cost::QuadraticCostFunction, x::AbstractVector, u::AbstractV
     if !is_blockdiag(cost)
         J += u'cost.H*x
     end
+    return J
 end
 
 function stage_cost(cost::QuadraticCostFunction, x::AbstractVector)
     0.5*x'cost.Q*x .+ dot(cost.q,x) .+ cost.c
 end
 
-function gradient!(E, cost::QuadraticCostFunction, x, u)
+function gradient!(E, cost::QuadraticCostFunction, x)
     E.q .= cost.Q*x .+ cost.q
+    return false
+end
+
+function gradient!(E, cost::QuadraticCostFunction, x, u)
+    gradient!(E, cost, x)
     E.r .= cost.R*u .+ cost.r
     if !is_blockdiag(cost)
         E.q .+= cost.H'u
@@ -101,7 +107,7 @@ function gradient!(E, cost::QuadraticCostFunction, x, u)
     return false
 end
 
-function hessian!(E, cost::QuadraticCostFunction, x, u)
+function hessian!(E, cost::QuadraticCostFunction, x)
     if cost.Q isa Diagonal
         for i = 1:length(x)
             E.Q[i,i] = cost.Q[i,i]
@@ -109,15 +115,22 @@ function hessian!(E, cost::QuadraticCostFunction, x, u)
     else
         E.Q .= cost.Q
     end
-    if cost.R isa Diagonal
-        for i = 1:length(u)
-            E.R[i,i] = cost.R[i,i]
+    return true
+end
+
+function hessian!(E, cost::QuadraticCostFunction, x, u)
+    hessian!(E, cost, x)
+    if !cost.terminal
+        if cost.R isa Diagonal
+            for i = 1:length(u)
+                E.R[i,i] = cost.R[i,i]
+            end
+        else
+            E.R .= cost.R
         end
-    else
-        E.R .= cost.R
-    end
-    if !is_blockdiag(cost)
-        E.H .= cost.H
+        if !is_blockdiag(cost)
+            E.H .= cost.H
+        end
     end
     return true
 end
@@ -138,26 +151,28 @@ function +(c1::QuadraticCostFunction, c2::QuadraticCostFunction)
                   c1.q + c2.q, c1.r + c2.r, c1.c + c2.c,
                   checks=false, terminal=c1.terminal && c2.terminal)
 end
-#
-# function LinearAlgebra.inv(cost::QC) where QC <: QuadraticCostFunction
-#     if is_blockdiag(cost)
-#         QuadraticCost(inv(cost.Q), inv(cost.R), cost.H, cost.q, cost.r, cost.c,
-#             checks=false, terminal=cost.terminal)
-#     else
-#         m,n = size(cost.H)
-#         H1 = [cost.Q cost.H']
-#         H2 = [cost.H cost.R ]
-#         H = [H1; H2]
-#         Hinv = inv(H)
-#         ix = 1:n
-#         iu = n .+ (1:m)
-#         Q = SizedMatrix{n,n}(Hinv[ix, ix])
-#         R = SizedMatrix{m,m}(Hinv[iu, iu])
-#         H = SizedMatrix{m,n}(Hinv[iu, ix])
-#         QC(Q,R,H, cost.q, cost.r, cost.c,
-#             checks=false, terminal=cost.terminal)
-#     end
-# end
+
+function invert!(Ginv, cost::QuadraticCostFunction{n,m}) where {n,m}
+    ix = 1:n
+    iu = n .+ (1:m)
+    if is_diag(cost)
+        for i = 1:n; Ginv[i,i] = inv(cost.Q[i,i]); end
+        if !cost.terminal
+            for i = 1:m; Ginv[i+n,i+n] = inv(cost.R[i,i]); end
+        end
+    elseif is_blockdiag(cost)
+        Ginv[ix,ix] .= inv(SizedMatrix{n,n}(cost.Q))
+        if !cost.terminal
+            Ginv[iu,iu] .= inv(SizedMatrix{m,m}(cost.R))
+        end
+    else
+        G1 = [cost.Q cost.H']
+        G2 = [cost.H cost.R ]
+        G = [G1; G2]
+        Ginv .= inv(G)
+    end
+end
+
 #
 #
 # raw"""
@@ -263,6 +278,9 @@ struct QuadraticCost{n,m,T,TQ,TR} <: QuadraticCostFunction{n,m,T}
         @assert size(H) == (m,n)
         zeroH = norm(H,Inf) ≈ 0
         m,n = size(H)
+        if checks
+            run_posdef_checks(Q,R)
+        end
         T = promote_type(eltype(Q), eltype(R), eltype(H), eltype(q), eltype(r), typeof(c))
         new{n,m,T,typeof(Q),typeof(R)}(Q, R, SizedMatrix{m,n}(H), MVector{n}(q),MVector{m}(r),c,
             terminal, zeroH)
@@ -273,14 +291,14 @@ state_dim(cost::QuadraticCost) = length(cost.q)
 control_dim(cost::QuadraticCost) = length(cost.r)
 is_blockdiag(cost::QuadraticCost) = cost.zeroH
 
-function QuadraticCost{T}(n::Int,m::Int) where T
+function QuadraticCost{T}(n::Int,m::Int; terminal::Bool=false) where T
     Q = SizedMatrix{n,n}(Matrix(one(Float64)*I,n,n))
     R = SizedMatrix{m,m}(Matrix(one(Float64)*I,m,m))
     H = SizedMatrix{m,n}(zeros(T,m,n))
     q = SizedVector{n}(zeros(T,n))
     r = SizedVector{m}(zeros(T,m))
     c = zero(T)
-    QuadraticCost(Q,R,H,q,r,c, checks=false, terminal=false)
+    QuadraticCost(Q,R,H,q,r,c, checks=false, terminal=terminal)
 end
 
 
@@ -333,7 +351,7 @@ function stage_cost(cost::QuadraticQuatCost, x::SVector)
     J += cost.w*min(1+dq, 1-dq)
 end
 
-function gradient!(E::QuadraticCost, cost::QuadraticQuatCost, x::SVector, u::SVector)
+function gradient!(E::QuadraticCost, cost::QuadraticQuatCost, x::SVector)
     Qx = cost.Q*x + cost.q
     q = x[cost.q_ind]
     dq = cost.q_ref'q
@@ -342,15 +360,24 @@ function gradient!(E::QuadraticCost, cost::QuadraticQuatCost, x::SVector, u::SVe
     else
         Qx -= cost.w*cost.Iq*cost.q_ref
     end
-    Qu = cost.R*u + cost.r
     E.q .= Qx
+    return false
+end
+
+function gradient!(E::QuadraticCost, cost::QuadraticQuatCost, x::SVector, u::SVector)
+    gradient!(E, cost, x)
+    Qu = cost.R*u + cost.r
     E.r .= Qu
     return false
 end
 
-function hessian!(E::QuadraticCost, cost::QuadraticQuatCost, x::SVector{N}, u::SVector{M}) where {N,M}
+function hessian!(E::QuadraticCost, cost::QuadraticQuatCost, x::SVector{N}) where {N,M}
     E.Q .= cost.Q
-    E.R .= cost.R
+    return false
+end
+
+function hessian!(E::QuadraticCost, cost::QuadraticQuatCost, x::SVector{N}, u::SVector{M}) where {N,M}
+    hessian!(E, cost, x)
     E.H .= @SMatrix zeros(M,N)
     return true
 end

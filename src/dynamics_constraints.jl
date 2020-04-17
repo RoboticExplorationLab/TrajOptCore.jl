@@ -61,6 +61,8 @@ integration(::DynamicsConstraint{Q}) where Q = Q
 
 widths(con::DynamicsConstraint{<:Any,<:Any,N,M,NM},n::Int=N,m::Int=M) where {N,M,NM} = (NM,NM)
 widths(con::DynamicsConstraint{<:Explicit,<:Any,N,M,NM},n::Int=N,m::Int=M) where {N,M,NM} = (NM,N)
+RobotDynamics.get_z(con::DynamicsConstraint{<:Explicit}, z1::AbstractKnotPoint, z2::AbstractKnotPoint) =
+	(RobotDynamics.get_z(z1), RobotDynamics.state(z2))
 
 function gen_views(∇c::AbstractMatrix, con::DynamicsConstraint{<:Explicit}, n=state_dim(con), m=control_dim(con))
 	if size(∇c,2) == n  # handle last Jacobian which is smaller

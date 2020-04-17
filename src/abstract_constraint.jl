@@ -143,6 +143,27 @@ get_dims(con::Union{ControlConstraint,CoupledControlConstraint}, nm::Int) =
 	nm - control_dim(con), control_dim(con)
 get_dims(con::AbstractConstraint, nm::Int) = state_dim(con), control_dim(con)
 
+"""
+	get_z(con::AbstractConstraint, z1::AbstractKnotPoint, z2::AbstractKnotPoint)
+
+Get the values used to calculate `con`, returned as a tuple of the current and the next
+time step. For example, a `StageConstraint` is a function of the states at only the current
+time step, so will return `(x,)`. An explicit dynamics constraint is a function of the
+states and controls at the current time step and only the state at the next time step, so
+will return `(z, x2)`.
+
+Useful for getting the vectors of the appropriate size to multiply the Jacobians.
+"""
+RobotDynamics.get_z(con::StateConstraint, z::AbstractKnotPoint) = (state(z),)
+RobotDynamics.get_z(con::ControlConstraint, z::AbstractKnotPoint) = (control(z),)
+RobotDynamics.get_z(con::StageConstraint, z::AbstractKnotPoint) = (RobotDynamics.get_z(z),)
+RobotDynamics.get_z(con::StageConstraint, z::AbstractKnotPoint, z2::AbstractKnotPoint) =
+	RobotDynamics.get_z(con, z)
+RobotDynamics.get_z(con::CoupledConstraint, z::AbstractKnotPoint, z2::AbstractKnotPoint) =
+	(RobotDynamics.get_z(z), RobotDynamics.get_z(z2))
+RobotDynamics.get_z(con::StageConstraint, Z::Traj, k) = RobotDynamics.get_z(con, Z[k])
+RobotDynamics.get_z(con::CoupledConstraint, Z::Traj, k) = RobotDynamics.get_z(con, Z[k], Z[k+1])
+
 con_label(::AbstractConstraint, i::Int) = "index $i"
 
 ############################################################################################

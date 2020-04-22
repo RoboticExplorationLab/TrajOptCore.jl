@@ -218,6 +218,9 @@ add_dynamics_constraints!(prob::Problem)
 ```
 Add dynamics constraints to the constraint set"
 function add_dynamics_constraints!(prob::Problem{Q}, integration=Q, idx=-1) where Q
+	if has_dynamics_constraint(prob.constraints)
+		return nothing
+	end
 	n,m = size(prob)
     conSet = prob.constraints
 

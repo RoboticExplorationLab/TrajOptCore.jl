@@ -98,6 +98,14 @@ function link_constraints!(set1::ALConstraintSet, set2::ALConstraintSet)
 	return links
 end
 
+function has_dynamics_constraint(conSet::ConstraintList)
+	for con in conSet
+		if con isa DynamicsConstraint
+			return true
+		end
+	end
+	return false
+end
 
 @inline get_convals(conSet::ALConstraintSet) = conSet.convals
 @inline get_errvals(conSet::ALConstraintSet) = conSet.errvals

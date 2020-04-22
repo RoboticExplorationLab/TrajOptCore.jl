@@ -123,6 +123,8 @@ include("convals.jl")
 include("problem.jl")
 include("conset.jl")
 include("solvers.jl")
+include("merit_functions.jl")
+include("line_search.jl")
 
 include("utils.jl")
 end # module

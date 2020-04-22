@@ -37,7 +37,9 @@ abstract type AbstractSolver{T} <: MOI.AbstractNLPEvaluator end
 @inline get_model(solver::AbstractSolver) = solver.model
 @inline get_objective(solver::AbstractSolver) = solver.obj
 @inline get_cost_expansion(solver::AbstractSolver) = solver.E
-@inline get_trajectory(solver::AbstractSolver) = solver.Z
+@inline get_cost_expansion_error(solver::AbstractSolver) = solver.E
+@inline get_error_state_jacobians(solver::AbstractSolver) = solver.G
+@inline get_trajectory(solver::AbstractSolver) = solver.Z.Z_
 @inline get_initial_state(solver::AbstractSolver) = solver.x0
 
 @inline get_solution(solver::AbstractSolver) = get_trajectory(solver)
@@ -64,7 +66,7 @@ get_constraints(::ConstrainedSolver)::ConstrainSet
 """
 abstract type ConstrainedSolver{T} <: AbstractSolver{T} end
 
-
+@inline get_duals(solver::ConstrainedSolver) = get_duals(get_constraints(solver))
 
 
 function cost(solver::AbstractSolver, Z=get_trajectory(solver))
@@ -72,6 +74,47 @@ function cost(solver::AbstractSolver, Z=get_trajectory(solver))
     cost(obj, Z)
 end
 
+function cost_expansion!(solver::AbstractSolver)
+    Z = get_trajectory(solver)
+    E, obj = get_cost_expansion(solver), get_objective(solver)
+    cost_expansion!(E, obj, Z)
+end
+
+error_expansion!(solver::AbstractSolver) = error_expansion_uncon!(solver)
+
+#--- Error Expansion ---#
+function error_expansion_uncon!(solver::AbstractSolver)
+    E  = get_cost_expansion_error(solver)
+    E0 = get_cost_expansion(solver)
+    G  = get_error_state_jacobians(solver)
+    error_expansion!(E, E0, get_model(solver), G)
+end
+
+function error_expansion!(solver::ConstrainedSolver)
+    error_expansion_uncon!(solver)
+    conSet = get_constraints(solver)
+    G = get_error_state_jacobians(solver)
+    error_expansion!(conSet, get_model(solver), G)
+end
+
+#--- Gradient Norm ---#
+function norm_grad(solver::UnconstrainedSolver, recalculate::Bool=true)
+    if recalculate
+        cost_expansion!(solver)
+    end
+    norm_grad(get_cost_expansion(solver))
+end
+
+function norm_grad(solver::ConstrainedSolver, recalculate::Bool=true)
+    conSet = get_constraints(solver)
+    if recalculate
+        cost_expansion!(solver)
+        jacobian
+    end
+    norm_grad(get_cost_expansion(solver))
+end
+
+#--- Rollout ---#
 function RobotDynamics.rollout!(solver::AbstractSolver)
     Z = get_trajectory(solver)
     model = get_model(solver)
@@ -86,14 +129,14 @@ function RobotDynamics.controls(solver::AbstractSolver)
     [control(Z[k]) for k = 1:N-1]
 end
 
-set_initial_state!(solver, x0) = copyto!(get_initial_state(solver), x0)
+set_initial_state!(solver::AbstractSolver, x0) = copyto!(get_initial_state(solver), x0)
 
 @inline TrajOptCore.initial_states!(solver::AbstractSolver, X0) = set_states!(get_trajectory(solver), X0)
 @inline TrajOptCore.initial_controls!(solver::AbstractSolver, U0) = set_controls!(get_trajectory(solver), U0)
 function TrajOptCore.initial_trajectory!(solver::AbstractSolver, Z0::Traj)
     Z = get_trajectory(solver)
     for k in eachindex(Z)
-        Z[k].z = copy(Z0[k].z)
+        RobotDynamics.set_z!(Z[k], Z0[k].z)
     end
 end
 
@@ -120,11 +163,81 @@ end
 # Constrained solver
 TrajOptCore.num_constraints(solver::AbstractSolver) = num_constraints(get_constraints(solver))
 
-function TrajOptCore.max_violation(solver::ConstrainedSolver, Z::Traj=get_trajectory(solver))
+function max_violation(solver::ConstrainedSolver, Z::Traj=get_trajectory(solver); recalculate=true)
     conSet = get_constraints(solver)
-    evaluate!(conSeti, Z)
-    max_violation(solver)
+    if recalculate
+        evaluate!(conSet, Z)
+    end
+    max_violation(conSet)
 end
 
-@inline TrajOptCore.findmax_violation(solver::ConstrainedSolver) =
+function norm_violation(solver::ConstrainedSolver, Z::Traj=get_trajectory(solver); recalculate=true, p=2)
+    conSet = get_constraints(solver)
+    if recalculate
+        evaluate!(conSet, Z)
+    end
+    max_violation(conSet)
+end
+
+@inline findmax_violation(solver::ConstrainedSolver) =
     findmax_violation(get_constraints(solver))
+
+function second_order_correction!(solver::ConstrainedSolver)
+    conSet = get_constraints(solver)
+	Z = get_primals(solver)     # get the current value of z + α⋅δz
+	evaluate!(conSet, Z)        # update constraints at new step
+	throw(ErrorException("second order correction not implemented yet..."))
+end
+
+"""
+	cost_dgrad(solver, Z, dZ; recalculate)
+
+Return the scalar directional gradient of the cost evaluated at `Z` in the direction of `dZ`,
+where `Z` and `dZ` are the types returned by `get_primals(solver)` and `get_step(solver)`,
+and must be able to be converted to a vector of `KnotPoint`s via `Traj()`.
+"""
+function cost_dgrad(solver::AbstractSolver, Z=get_primals(solver), dZ=get_step(solver);
+		recalculate=true)
+	E = TrajOptCore.get_cost_expansion(solver)
+	if recalculate
+		obj = get_objective(solver)
+		cost_gradient!(E, obj, Traj(Z.Z))
+	end
+	dgrad(E, Traj(dZ))
+end
+
+"""
+	norm_dgrad(solver, Z, dZ; recalculate, p)
+
+Calculate the directional derivative of `norm(c(Z), p)` in the direction of `dZ`, where
+`c(Z)` is the vector of constraints evaluated at `Z`.
+`Z` and `dZ` are the types returned by `get_primals(solver)` and `get_step(solver)`,
+and must be able to be converted to a vector of `KnotPoint`s via `Traj()`.
+"""
+function norm_dgrad(solver::AbstractSolver, Z=get_primals(solver), dZ=get_step(solver);
+		recalculate=true, p=1)
+    conSet = get_constraints(solver)
+	if recalculate
+		Z_ = Traj(Z)
+		evaluate!(conSet, Z_)
+		jacobian!(conSet, Z_)
+	end
+    Dc = norm_dgrad(conSet, Traj(dZ), 1)
+end
+
+
+"""
+	dhess(solver, Z, dZ; recalculate)
+
+Calculate the scalar 0.5*dZ'G*dZ where G is the hessian of cost, evaluating the cost hessian
+at `Z`.
+"""
+function cost_dhess(solver::AbstractSolver, Z=TrajOptCore.get_primals(solver),
+		dZ=TrajOptCore.get_step(solver); recalculate=true)
+	E = TrajOptCore.get_cost_expansion_error(solver)
+	if recalculate
+		obj = get_objective(solver)
+		cost_hessian!(E, obj, Traj(Z))
+	end
+	dhess(solver.E, Traj(dZ))
+end

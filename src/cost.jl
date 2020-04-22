@@ -139,6 +139,39 @@ function dgrad(E::QuadraticExpansion{n,m,T}, dZ::Traj)::T where {n,m,T}
 	return g
 end
 
+"""
+	dhess(E::QuadraticCost, dZ::Traj)
+
+Calculate the scalar 0.5*dZ'G*dZ where G is the hessian of cost
+"""
+function dhess(E::QuadraticExpansion{n,m,T}, dZ::Traj)::T where {n,m,T}
+	h = zero(T)
+	N = length(E)
+	for k = 1:N-1
+		x = state(dZ[k])
+		u = control(dZ[k])
+		h += dot(x, E[k].Q, x) + dot(u, E[k].R, u)
+	end
+	x = state(dZ[N])
+	h += dot(x, E[N].Q, x)
+	return 0.5*h
+end
+
+"""
+	norm_grad(E::QuadraticExpansion, p=2)
+
+Norm of the cost gradient
+"""
+function norm_grad(E::QuadraticExpansion{n,m,T}, p=2)::T where {n,m,T}
+	J = get_J(E)
+	for (k,cost) in enumerate(E)
+		J[k] = norm(cost.q, p)
+		if !cost.terminal
+			J[k] = norm(SA[norm(cost.r, p) J[k]], p)
+		end
+	end
+	return norm(J, p)
+end
 
 # # In-place cost-expansion
 # function cost_expansion!(E::AbstractExpansion, cost::CostFunction, z::KnotPoint)

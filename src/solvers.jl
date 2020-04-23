@@ -157,7 +157,10 @@ function get_primals(solver::AbstractSolver, α)
     z = get_solution(solver)
     z̄ = get_primals(solver)
     dz = get_step(solver)
-    z̄ .= z .+ α*dz
+	for k in eachindex(z)
+		z̄[k] = z[k] + α*dz[k]
+	end
+	return z̄
 end
 
 # Constrained solver
@@ -201,7 +204,7 @@ function cost_dgrad(solver::AbstractSolver, Z=get_primals(solver), dZ=get_step(s
 	E = TrajOptCore.get_cost_expansion(solver)
 	if recalculate
 		obj = get_objective(solver)
-		cost_gradient!(E, obj, Traj(Z.Z))
+		cost_gradient!(E, obj, Traj(Z))
 	end
 	dgrad(E, Traj(dZ))
 end

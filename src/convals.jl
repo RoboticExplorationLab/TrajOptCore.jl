@@ -231,9 +231,9 @@ function gen_convals(blocks::Vector, cinds, con::AbstractConstraint, inds)
 			w = size(blocks[k].Y,2)
 			view(blocks[k].Y,1:0,1:w)
 		else
-			w = size(blocks[k+1].Y,2)
+			ws = widths(con)
 			n = state_dim(con)
-			view(blocks[k+1].Y,1:n,1:w)
+			view(blocks[k+1].Y,1:n,1:ws[2])
 		end
 	end
 	C = [C1 C2]

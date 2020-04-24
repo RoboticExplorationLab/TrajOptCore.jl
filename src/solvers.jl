@@ -68,6 +68,11 @@ abstract type ConstrainedSolver{T} <: AbstractSolver{T} end
 
 @inline get_duals(solver::ConstrainedSolver) = get_duals(get_constraints(solver))
 
+""" $(TYPEDEF)
+Solve the trajectory optimization problem by computing search directions using the joint
+state vector, often solving the KKT system directly.
+"""
+abstract type DirectSolver{T} <: ConstrainedSolver{T} end
 
 function cost(solver::AbstractSolver, Z=get_trajectory(solver))
     obj = get_objective(solver)

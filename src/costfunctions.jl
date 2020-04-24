@@ -147,7 +147,10 @@ Base.promote_rule(::Type{<:QuadraticCostFunction}, ::Type{<:QuadraticCostFunctio
 function +(c1::QuadraticCostFunction, c2::QuadraticCostFunction)
     @assert state_dim(c1) == state_dim(c2)
     @assert control_dim(c1) == control_dim(c2)
-    QuadraticCost(c1.Q + c2.Q, c1.R + c2.R, c1.H + c2.H,
+    n,m = state_dim(c1), control_dim(c1)
+    H1 = c1 isa DiagonalCost ? zeros(m,n) : c1.H
+    H2 = c2 isa DiagonalCost ? zeros(m,n) : c2.H
+    QuadraticCost(c1.Q + c2.Q, c1.R + c2.R, H1 + H2,
                   c1.q + c2.q, c1.r + c2.r, c1.c + c2.c,
                   checks=false, terminal=c1.terminal && c2.terminal)
 end
@@ -244,7 +247,7 @@ function change_dimension(cost::DiagonalCost, n::Int, m::Int, ix, iu)
     Rd[iu] = diag(cost.R)
     q[ix] = cost.q
     r[iu] = cost.r
-    DiagonalCost(Qd, Rd, q, r, cost.c, cost.terminal)
+    DiagonalCost(Qd, Rd, q=q, r=r, c=cost.c, terminal=cost.terminal, checks=false)
 end
 
 """
@@ -410,7 +413,7 @@ function change_dimension(cost::QuadraticQuatCost, n, m)
         r = [r; pad]
     end
     QuadraticQuatCost(Diagonal(Q_diag), Diagonal(R_diag), q, r, cost.c, cost.w,
-        cost.q_ref, cost.q_ind)
+        cost.q_ref, cost.q_ind, checks=false)
 end
 
 function (+)(cost1::QuadraticQuatCost, cost2::QuadraticCost)

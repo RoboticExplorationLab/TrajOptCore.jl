@@ -80,6 +80,9 @@ function update_penalty!(l1::L1Merit, solver::AbstractSolver, Z=get_solution(sol
     μ = l1.μ
     ρ = l1.ρ
     thresh = (g + max(h, 0))/((1 - ρ)*c)
+    if thresh == Inf
+        @warn "Infinite merit penalty"
+    end
     if μ < thresh
         println("Updated μ")
         l1.μ = thresh * l1.μ_margin
@@ -90,12 +93,12 @@ end
 function merit_value(l1::L1Merit, solver, Z)
     obj = get_objective(solver)
     _J = get_J(obj)
-    cost!(obj, Z.Z_)
+    cost!(obj, Traj(Z))
     J = sum(_J)
 
     # Calculate constraint violation
     conSet = get_constraints(solver)
-    evaluate!(conSet, Z)
+    evaluate!(conSet, Traj(Z))
     c = norm_violation(solver.conSet)
 
     return J + l1.μ*c
@@ -116,6 +119,10 @@ end
 
 abstract type LineSearchCriteria end
 
+@inline function (condition::LineSearchCriteria)(merit::MeritFunction, solver::AbstractSolver,
+        α, use_cache=false; kwargs...)
+    condition(gen_ϕ(merit, solver), gen_ϕ′(merit, solver), α, use_cache; kwargs...)
+end
 @inline function (condition::LineSearchCriteria)(ϕ, ϕ′, α, use_cache=false; recalculate::Bool=true)
     sd = sufficient_decrease(condition, ϕ, ϕ′, α, use_cache, recalculate=recalculate)::Bool
     if sd

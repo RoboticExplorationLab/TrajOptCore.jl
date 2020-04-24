@@ -16,17 +16,39 @@ import Base: copy, +
 
 abstract type CostFunction end
 
-abstract type QuadraticCostFunction <: CostFunction end
+abstract type QuadraticCostFunction{n,m,T} <: CostFunction end
 
 @inline QuadraticCostFunction(cost::QuadraticCostFunction) = cost
 @inline QuadraticCostFunction(cost::CostFunction) =
     QuadraticCost{Float64}(state_dim(cost), control_dim(cost))
+is_diag(cost::QuadraticCostFunction) = is_blockdiag(cost) && cost.Q isa Diagonal && cost.R isa Diagonal
+
+function invert!(Ginv, cost::QuadraticCostFunction{n,m}) where {n,m}
+    ix = 1:n
+    iu = n .+ (1:m)
+    if is_diag(cost)
+        for i = 1:n; Ginv[i,i] = inv(cost.Q[i,i]); end
+        if !cost.terminal
+            for i = 1:m; Ginv[i+n,i+n] = inv(cost.R[i,i]); end
+        end
+    elseif is_blockdiag(cost)
+        Ginv[ix,ix] .= inv(SizedMatrix{n,n}(cost.Q))
+        if !cost.terminal
+            Ginv[iu,iu] .= inv(SizedMatrix{m,m}(cost.R))
+        end
+    else
+        G1 = [cost.Q cost.H']
+        G2 = [cost.H cost.R ]
+        G = [G1; G2]
+        Ginv .= inv(G)
+    end
+end
 
 #######################################################
 #              COST FUNCTION INTERFACE                #
 #######################################################
 
-struct DiagonalCost{n,m,T} <: QuadraticCostFunction
+struct DiagonalCost{n,m,T} <: QuadraticCostFunction{n,m,T}
     Q::Diagonal{T,SVector{n,T}}
     R::Diagonal{T,SVector{m,T}}
     q::SVector{n,T}
@@ -37,7 +59,7 @@ struct DiagonalCost{n,m,T} <: QuadraticCostFunction
                           q::StaticVector{n},  r::StaticVector{m},
                           c::Real, terminal::Bool=false) where {n,m}
         T = promote_type(typeof(c), eltype(Qd), eltype(Rd), eltype(q), eltype(r))
-        new{n,m,T}(Diagonal(SVector(Qd)), Diagonal(SVector(Rd)), SVector(q), SVector(r), T(c))
+        new{n,m,T}(Diagonal(SVector(Qd)), Diagonal(SVector(Rd)), SVector(q), SVector(r), T(c), terminal)
     end
 end
 
@@ -66,6 +88,8 @@ end
 
 state_dim(::DiagonalCost{n}) where n = n
 control_dim(::DiagonalCost{<:Any,m}) where m = m
+is_blockdiag(::DiagonalCost) = true
+is_diag(::DiagonalCost) = true
 
 function stage_cost(cost::DiagonalCost, x::SVector, u::SVector)
     return cost.r'u + 0.5*u'cost.R*u + stage_cost(cost, x)
@@ -86,14 +110,22 @@ function hessian!(E::AbstractExpansion, cost::DiagonalCost, x, u)
     E.ux .= 0
 end
 
-function gradient!(E::QuadraticCostFunction, cost::DiagonalCost, x, u)
+function gradient!(E::QuadraticCostFunction, cost::DiagonalCost, x)
     E.q .= cost.Q*x .+ cost.q
+    return false
+end
+function gradient!(E::QuadraticCostFunction, cost::DiagonalCost, x, u)
+    gradient!(E, cost, x)
     E.r .= cost.R*u .+ cost.r
     return false
 end
 
-function hessian!(E::QuadraticCostFunction, cost::DiagonalCost, x, u)
+function hessian!(E::QuadraticCostFunction, cost::DiagonalCost, x)
     E.Q .= cost.Q
+    return false
+end
+function hessian!(E::QuadraticCostFunction, cost::DiagonalCost, x, u)
+    hessian!(E, cost, x)
     E.R .= cost.R
     return true
 end
@@ -142,7 +174,7 @@ QuadraticCost(Q, q, c)
 ```
 Any optional or omitted values will be set to zero(s).
 """
-mutable struct QuadraticCost{n,m,T,TQ,TR} <: QuadraticCostFunction
+mutable struct QuadraticCost{n,m,T,TQ,TR} <: QuadraticCostFunction{n,m,T}
     Q::TQ                     # Quadratic stage cost for states (n,n)
     R::TR                     # Quadratic stage cost for controls (m,m)
     H::SizedMatrix{m,n,T,2}   # Quadratic Cross-coupling for state and controls (m,n)
@@ -185,6 +217,7 @@ end
 
 state_dim(cost::QuadraticCost) = length(cost.q)
 control_dim(cost::QuadraticCost) = length(cost.r)
+is_blockdiag(cost::QuadraticCost) = cost.zeroH
 
 # Constructors
 function QuadraticCost(Q,R; H=similar(Q,size(Q,1), size(R,1))*0, q=zeros(size(Q,1)),
@@ -205,14 +238,14 @@ function QuadraticCost(Q,q,c; checks=true)
     QuadraticCost(Q,zeros(0,0),zeros(0,size(Q,1)),q,zeros(0),c,checks=checks, terminal=true)
 end
 
-function QuadraticCost{T}(n::Int,m::Int) where T
+function QuadraticCost{T}(n::Int,m::Int; terminal=false) where T
     Q = SizedMatrix{n,n}(Matrix(one(Float64)*I,n,n))
     R = SizedMatrix{m,m}(Matrix(one(Float64)*I,m,m))
     H = SizedMatrix{m,n}(zeros(T,m,n))
     q = SizedVector{n}(zeros(T,n))
     r = SizedVector{m}(zeros(T,m))
     c = zero(T)
-    QuadraticCost(Q,R,H,q,r,c, checks=false, terminal=false)
+    QuadraticCost(Q,R,H,q,r,c, checks=false, terminal=terminal)
 end
 
 """
@@ -259,15 +292,26 @@ function stage_cost(cost::QuadraticCost, xN::AbstractVector{T}) where T
     0.5*xN'cost.Q*xN .+ cost.q'*xN .+ cost.c
 end
 
-function gradient!(E::QuadraticCost, cost::QuadraticCost, x, u)
+function gradient!(E::QuadraticCost, cost::QuadraticCost, x)
     E.q .= cost.Q*x .+ cost.q .+ cost.H'u
+    return false
+end
+function gradient!(E::QuadraticCost, cost::QuadraticCost, x, u)
+    gradient!(E, cost, x)
     E.r .= cost.R*u .+ cost.r .+ cost.H*x
     return false
 end
 
 function hessian!(E::QuadraticCost, cost::QuadraticCost, x, u)
     E.Q .= cost.Q
+    return true
+end
+function hessian!(E::QuadraticCost, cost::QuadraticCost, x, u)
+    hessian!(E, cost, x)
     E.R .= cost.R
+    if is_blockdiag(cost)
+        E.H .= cost.H
+    end
     return true
 end
 

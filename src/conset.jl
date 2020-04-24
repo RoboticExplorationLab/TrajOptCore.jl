@@ -159,6 +159,16 @@ function norm_violation!(conSet::AbstractConstraintSet, p=2)
 	end
 end
 
+function norm_dgrad(conSet::AbstractConstraintSet, dx::Traj, p=1)
+	convals = get_convals(conSet)
+	T = eltype(conSet.c_max)
+	for i in eachindex(convals)
+		norm_dgrad!(convals[i], dx, p)
+		c_max = convals[i].c_max::Vector{T}
+		conSet.c_max[i] = sum(c_max)
+	end
+	return sum(conSet.c_max)
+end
 
 function max_penalty!(conSet::ALConstraintSet{T}) where T
     conSet.c_max .*= 0

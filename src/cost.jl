@@ -7,7 +7,7 @@
 
 "$(TYPEDSIGNATURES) Evaluate the cost at a knot point, and automatically handle terminal
 knot point, multiplying by dt as necessary."
-function stage_cost(cost::CostFunction, z::KnotPoint)
+function stage_cost(cost::CostFunction, z::AbstractKnotPoint)
     if is_terminal(z)
         stage_cost(cost, state(z))
     else
@@ -33,7 +33,11 @@ function cost_gradient!(E::Objective, obj::Objective, Z::Traj, init::Bool=false)
     N = length(Z)
     for k in eachindex(Z)
         if init || !is_const[k]
-            is_const[k] = gradient!(E.cost[k], obj.cost[k], state(Z[k]), control(Z[k]))
+			if is_terminal(Z[k])
+            	is_const[k] = gradient!(E.cost[k], obj.cost[k], state(Z[k]))
+			else
+            	is_const[k] = gradient!(E.cost[k], obj.cost[k], state(Z[k]), control(Z[k]))
+			end
             dt_x = k < N ? Z[k].dt :  one(Z[k].dt)
             dt_u = k < N ? Z[k].dt : zero(Z[k].dt)
             E[k].q .*= dt_x
@@ -47,7 +51,11 @@ function cost_hessian!(E::Objective, obj::Objective, Z::Traj, init::Bool=false)
     N = length(Z)
     for k in eachindex(Z)
         if init || !is_const[k]
-            is_const[k] = hessian!(E.cost[k], obj.cost[k], state(Z[k]), control(Z[k]))
+			if is_terminal(Z[k])
+            	is_const[k] = hessian!(E.cost[k], obj.cost[k], state(Z[k]))
+			else
+            	is_const[k] = hessian!(E.cost[k], obj.cost[k], state(Z[k]), control(Z[k]))
+			end
             dt_x = k < N ? Z[k].dt :  one(Z[k].dt)
             dt_u = k < N ? Z[k].dt : zero(Z[k].dt)
             E[k].Q .*= dt_x
@@ -110,6 +118,53 @@ end
 
 function static_expansion(cost::QuadraticCost)
 	StaticExpansion(cost.q, cost.Q, cost.r, cost.R, cost.H)
+end
+
+"""
+	dgrad(E::QuadraticExpansion, dZ::Traj)
+Calculate the derivative of the cost in the direction of `dZ`, where `E` is the current
+quadratic expansion of the cost.
+"""
+function dgrad(E::QuadraticExpansion{n,m,T}, dZ::Traj)::T where {n,m,T}
+	g = zero(T)
+	N = length(E)
+	for k = 1:N-1
+		g += dot(E[k].q, state(dZ[k])) + dot(E[k].r, control(dZ[k]))
+	end
+	g += dot(E[N].q, state(dZ[N]))
+	return g
+end
+
+"""
+	dhess(E::QuadraticCost, dZ::Traj)
+Calculate the scalar 0.5*dZ'G*dZ where G is the hessian of cost
+"""
+function dhess(E::QuadraticExpansion{n,m,T}, dZ::Traj)::T where {n,m,T}
+	h = zero(T)
+	N = length(E)
+	for k = 1:N-1
+		x = state(dZ[k])
+		u = control(dZ[k])
+		h += dot(x, E[k].Q, x) + dot(u, E[k].R, u)
+	end
+	x = state(dZ[N])
+	h += dot(x, E[N].Q, x)
+	return 0.5*h
+end
+
+"""
+	norm_grad(E::QuadraticExpansion, p=2)
+Norm of the cost gradient
+"""
+function norm_grad(E::QuadraticExpansion{n,m,T}, p=2)::T where {n,m,T}
+	J = get_J(E)
+	for (k,cost) in enumerate(E)
+		J[k] = norm(cost.q, p)
+		if !cost.terminal
+			J[k] = norm(SA[norm(cost.r, p) J[k]], p)
+		end
+	end
+	return norm(J, p)
 end
 
 # # In-place cost-expansion

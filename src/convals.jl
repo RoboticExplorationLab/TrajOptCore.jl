@@ -6,6 +6,7 @@ struct ConVal{C,V,M,W}
     con::C
     inds::UnitRange{Int}
     vals::Vector{V}
+	vals2::Vector{V}
     jac::Matrix{M}
     ∇x::Matrix{W}
     ∇u::Matrix{W}
@@ -16,6 +17,7 @@ struct ConVal{C,V,M,W}
 		if !iserr && size(gen_jacobian(con)) != size(jac[1])
 			throw(DimensionMismatch("size of jac[i] $(size(jac[1])) does not match the expected size of $(size(gen_jacobian(con)))"))
 		end
+		vals2 = deepcopy(vals)
         p = length(con)
         P = length(vals)
         ix = 1:n
@@ -26,7 +28,7 @@ struct ConVal{C,V,M,W}
         c_max = zeros(P)
 		is_const = zeros(Bool,P)
         new{typeof(con), eltype(vals), eltype(jac), eltype(∇x)}(con,
-			inds, vals, jac, ∇x, ∇u, c_max, is_const, iserr)
+			inds, vals, vals2, jac, ∇x, ∇u, c_max, is_const, iserr)
     end
 end
 
@@ -122,6 +124,52 @@ function norm_violation!(cval::ConVal, p=2)
 	for i in eachindex(cval.inds)
 		cval.c_max[i] = norm_violation(s, cval.vals[i], p)
 	end
+end
+
+function norm_dgrad!(cval::ConVal, Z::Traj, p=1)
+	for (i,k) in enumerate(cval.inds)
+		zs = RobotDynamics.get_z(cval.con, Z, k)
+		mul!(cval.vals2[i], cval.jac[i,1], zs[1])
+		if length(zs) > 1
+			mul!(cval.vals2[i], cval.jac[i,2], zs[2], 1.0, 1.0)
+		end
+		cval.c_max[i] = norm_dgrad(cval.vals[i], cval.vals2[i], p)
+	end
+	return nothing
+end
+"""
+	dgrad(x, dx, p=1)
+Directional derivative of `norm(x, p)` in the direction `dx`
+"""
+function norm_dgrad(x, dx, p=1)
+	g = zero(eltype(x))
+	if p == 1
+		@assert length(x) == length(dx)
+		g = zero(eltype(x))
+		for i in eachindex(x)
+			if x[i] < 0
+				g += -dx[i]
+			elseif x[i] > 0
+				g += dx[i]
+			else
+				g += abs(dx[i])
+			end
+		end
+	else
+		throw("Directional derivative of $p-norm isn't implemented yet")
+	end
+	return g
+end
+
+function norm_residual!(res, cval::ConVal, λ::Vector{<:AbstractVector}, p=2)
+	for (i,k) in enumerate(cval.inds)
+		mul!(res[i], cval.jac[i,1], λ[i])
+		if size(cval.jac,2) > 1
+			mul!(res[i], cval.jac[i,2], λ[i], 1.0, 1.0)
+		end
+		cval.c_max[i] = norm(res[i], p)
+	end
+	return nothing
 end
 
 function error_expansion!(errval::ConVal, conval::ConVal, model::AbstractModel, G)

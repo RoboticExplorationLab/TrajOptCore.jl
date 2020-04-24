@@ -173,6 +173,17 @@ function norm_grad(E::QuadraticExpansion{n,m,T}, p=2)::T where {n,m,T}
 	return norm(J, p)
 end
 
+"""
+	residual!(res, E::QuadraticExpansion)
+
+Add the gradient to the residual `res`
+"""
+function residual!(res::Vector{<:StaticVector}, E::QuadraticExpansion)
+	for (k,cost) in enumerate(E)
+		res[k] = [cost.q; cost.r]
+	end
+end
+
 # # In-place cost-expansion
 # function cost_expansion!(E::AbstractExpansion, cost::CostFunction, z::KnotPoint)
 #     cost_gradient!(E, cost, z)

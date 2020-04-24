@@ -163,13 +163,12 @@ function norm_dgrad(x, dx, p=1)
 	return g
 end
 
-function norm_residual!(res, cval::ConVal, λ::Vector{<:AbstractVector}, p=2)
+function residual!(res, cval::ConVal, λ::Vector{<:AbstractVector})
 	for (i,k) in enumerate(cval.inds)
-		mul!(res[i], cval.jac[i,1], λ[i])
+		mul!(res[i], cval.jac[i,1], λ[i], 1.0, 1.0)
 		if size(cval.jac,2) > 1
 			mul!(res[i], cval.jac[i,2], λ[i], 1.0, 1.0)
 		end
-		cval.c_max[i] = norm(res[i], p)
 	end
 	return nothing
 end

@@ -103,13 +103,13 @@ end
 @inline get_errvals(conSet::ALConstraintSet) = conSet.errvals
 
 # Constraint Evaluation
-function evaluate!(conSet::AbstractConstraintSet, Z::Traj)
+function evaluate!(conSet::AbstractConstraintSet, Z::ATraj)
     for conval in get_convals(conSet)
         evaluate!(conval, Z)
     end
 end
 
-function jacobian!(conSet::AbstractConstraintSet, Z::Traj)
+function jacobian!(conSet::AbstractConstraintSet, Z::ATraj)
     for conval in get_convals(conSet)
         jacobian!(conval, Z)
     end
@@ -159,7 +159,7 @@ function norm_violation!(conSet::AbstractConstraintSet, p=2)
 	end
 end
 
-function norm_dgrad(conSet::AbstractConstraintSet, dx::Traj, p=1)
+function norm_dgrad(conSet::AbstractConstraintSet, dx::ATraj, p=1)
 	convals = get_convals(conSet)
 	T = eltype(conSet.c_max)
 	for i in eachindex(convals)
@@ -290,13 +290,13 @@ function cost!(J::Vector{<:Real}, conval::ConVal, λ::Vector{<:StaticVector},
 	end
 end
 
-function cost_expansion!(E::Objective, conSet::ALConstraintSet, Z::Traj, init::Bool=false)
+function cost_expansion!(E::Objective, conSet::ALConstraintSet, Z::ATraj, init::Bool=false)
 	for i in eachindex(conSet.errvals)
 		cost_expansion!(E, conSet.convals[i], conSet.λ[i], conSet.μ[i], conSet.active[i])
 	end
 end
 
-@generated function cost_expansion!(E::QuadraticObjective{n,m}, conval::ConVal{C}, λ, μ, a) where {n,m,C}
+@generated function cost_expansion!(E::TrajOptCore.QuadraticExpansion{n,m}, conval::ConVal{C}, λ, μ, a) where {n,m,C}
 	if C <: StateConstraint
 		expansion = quote
 			cx = ∇c
@@ -320,6 +320,89 @@ end
 			E[k].H .+= cu'Iμ*cx
 			E[k].R .+= cu'Iμ*cu
 			E[k].r .+= cu'g
+		end
+	else
+		throw(ArgumentError("cost expansion not supported for CoupledConstraints"))
+	end
+	quote
+		for (i,k) in enumerate(conval.inds)
+			∇c = SMatrix(conval.jac[i])
+			c = conval.vals[i]
+			Iμ = Diagonal(a[i] .* μ[i])
+			g = Iμ*c .+ λ[i]
+
+			$expansion
+		end
+	end
+end
+
+function cost_gradient!(E::Objective, conSet::ALConstraintSet, Z::ATraj, init::Bool=false)
+	for i in eachindex(conSet.errvals)
+		cost_gradient!(E, conSet.convals[i], conSet.λ[i], conSet.μ[i], conSet.active[i])
+	end
+end
+
+@generated function cost_gradient!(E::TrajOptCore.QuadraticExpansion{n,m}, conval::ConVal{C}, λ, μ, a) where {n,m,C}
+	if C <: StateConstraint
+		expansion = quote
+			cx = ∇c
+			E[k].q .+= cx'g
+		end
+	elseif C <: ControlConstraint
+		expansion = quote
+			cu = ∇c
+			E[k].r .+= cu'g
+		end
+	elseif C<: StageConstraint
+		ix = SVector{n}(1:n)
+		iu = SVector{m}(n .+ (1:m))
+		expansion = quote
+			cx = ∇c[:,$ix]
+			cu = ∇c[:,$iu]
+			E[k].q .+= cx'g
+			E[k].r .+= cu'g
+		end
+	else
+		throw(ArgumentError("cost expansion not supported for CoupledConstraints"))
+	end
+	quote
+		for (i,k) in enumerate(conval.inds)
+			∇c = SMatrix(conval.jac[i])
+			c = conval.vals[i]
+			Iμ = Diagonal(a[i] .* μ[i])
+			g = Iμ*c .+ λ[i]
+
+			$expansion
+		end
+	end
+end
+
+function cost_hessian!(E::Objective, conSet::ALConstraintSet, Z::Traj, init::Bool=false)
+	for i in eachindex(conSet.errvals)
+		cost_hessian!(E, conSet.convals[i], conSet.λ[i], conSet.μ[i], conSet.active[i])
+	end
+end
+
+@generated function cost_hessian!(E::TrajOptCore.QuadraticExpansion{n,m}, conval::ConVal{C}, λ, μ, a) where {n,m,C}
+	if C <: StateConstraint
+		expansion = quote
+			cx = ∇c
+			E[k].Q .+= cx'Iμ*cx
+		end
+	elseif C <: ControlConstraint
+		expansion = quote
+			cu = ∇c
+			E[k].R .+= cu'Iμ*cu
+		end
+	elseif C<: StageConstraint
+		ix = SVector{n}(1:n)
+		iu = SVector{m}(n .+ (1:m))
+		expansion = quote
+			cx = ∇c[:,$ix]
+			cu = ∇c[:,$iu]
+			E[k].Q .+= cx'Iμ*cx
+			E[k].H .+= cu'Iμ*cx
+			E[k].R .+= cu'Iμ*cu
 		end
 	else
 		throw(ArgumentError("cost expansion not supported for CoupledConstraints"))

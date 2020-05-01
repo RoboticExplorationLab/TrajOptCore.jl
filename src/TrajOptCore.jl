@@ -10,6 +10,7 @@ using UnsafeArrays
 
 import RobotDynamics: Implicit, Explicit, AbstractKnotPoint, DEFAULT_Q, is_terminal, state_diff, StaticKnotPoint
 import RobotDynamics: jacobian!, error_expansion!, error_expansion, state_dim, control_dim  # extended methods
+const ATraj = RobotDynamics.AbstractTrajectory
 
 # re-export
 import RobotDynamics: KnotPoint
@@ -119,6 +120,7 @@ include("convals.jl")
 # include("constraint_block.jl")
 include("problem.jl")
 include("conset.jl")
+# include("nlp.jl")
 
 include("utils.jl")
 end # module

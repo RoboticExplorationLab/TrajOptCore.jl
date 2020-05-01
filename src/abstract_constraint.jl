@@ -161,8 +161,8 @@ RobotDynamics.get_z(con::StageConstraint, z::AbstractKnotPoint, z2::AbstractKnot
 	RobotDynamics.get_z(con, z)
 RobotDynamics.get_z(con::CoupledConstraint, z::AbstractKnotPoint, z2::AbstractKnotPoint) =
 	(RobotDynamics.get_z(z), RobotDynamics.get_z(z2))
-RobotDynamics.get_z(con::StageConstraint, Z::Traj, k) = RobotDynamics.get_z(con, Z[k])
-RobotDynamics.get_z(con::CoupledConstraint, Z::Traj, k) = RobotDynamics.get_z(con, Z[k], Z[k+1])
+RobotDynamics.get_z(con::StageConstraint, Z::ATraj, k) = RobotDynamics.get_z(con, Z[k])
+RobotDynamics.get_z(con::CoupledConstraint, Z::ATraj, k) = RobotDynamics.get_z(con, Z[k], Z[k+1])
 
 ############################################################################################
 # 								EVALUATION METHODS 										   #
@@ -182,14 +182,14 @@ For W<:General,this must function must be explicitly defined. Other types may de
 	if desired.
 """
 function evaluate!(vals::Vector{<:AbstractVector}, con::StageConstraint,
-		Z::Traj, inds=1:length(Z))
+		Z::ATraj, inds=1:length(Z))
 	for (i,k) in enumerate(inds)
 		vals[i] .= evaluate(con, Z[k])
 	end
 end
 
 function evaluate!(vals::Vector{<:AbstractVector}, con::CoupledConstraint,
-		Z::Traj, inds=1:length(Z)-1)
+		Z::ATraj, inds=1:length(Z)-1)
 	for (i,k) in enumerate(inds)
 		vals[i] .= evaluate(con, Z[k], Z[k+1])
 	end
@@ -210,14 +210,14 @@ For W<:General,this must function must be explicitly defined. Other types may de
 	if desired.
 """
 function jacobian!(∇c::VecOrMat{<:AbstractMatrix}, con::StageConstraint,
-		Z::Traj, inds=1:length(Z))
+		Z::ATraj, inds=1:length(Z))
 	for (i,k) in enumerate(inds)
 		jacobian!(∇c[i], con, Z[k])
 	end
 end
 
 function jacobian!(∇c::VecOrMat{<:AbstractMatrix}, con::CoupledConstraint,
-		Z::Traj, inds=1:size(∇c,1))
+		Z::ATraj, inds=1:size(∇c,1))
 	for (i,k) in enumerate(inds)
 		jacobian!(∇c[i,1], con, Z[k], Z[k+1], 1)
 		jacobian!(∇c[i,2], con, Z[k], Z[k+1], 2)

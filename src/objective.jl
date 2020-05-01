@@ -16,10 +16,19 @@ Evaluate the cost for a trajectory.
 Calculate the cost gradient for an entire trajectory. If a dynamics constraint is given,
     use the appropriate integration rule, if defined.
 """
-function cost(obj::AbstractObjective, Z)
+function cost(obj::AbstractObjective, Z::RobotDynamics.AbstractTrajectory{<:Any,<:Any,<:AbstractFloat})
     cost!(obj, Z)
     J = get_J(obj)
     return sum(J)
+end
+
+# ForwardDiff-able method
+function cost(obj::AbstractObjective, Z::RobotDynamics.AbstractTrajectory{<:Any,<:Any,T}) where T
+    J = zero(T)
+    for k = 1:length(obj)
+        J += stage_cost(obj[k], Z[k])
+    end
+    return J
 end
 
 
@@ -95,8 +104,7 @@ function QuadraticObjective(obj::AbstractObjective)
 end
 
 function QuadraticObjective(n::Int, m::Int, N::Int)
-    costfun = QuadraticCost{Float64}(n,m)
-    Objective([copy(costfun) for k = 1:N])
+    obj = Objective([QuadraticCost{Float64}(n,m,terminal=(k==N)) for k = 1:N])
 end
 
 function QuadraticObjective(obj::QuadraticObjective, model::AbstractModel)

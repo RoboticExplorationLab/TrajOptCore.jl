@@ -19,7 +19,7 @@ end
 cost(obj, dyn_con::DynamicsConstraint{Q}, Z) where Q<:QuadratureRule = cost(obj, Z)
 
 "Evaluate the cost for a trajectory (non-allocating)"
-@inline function cost!(obj::Objective, Z::Traj)
+@inline function cost!(obj::Objective, Z::RobotDynamics.AbstractTrajectory)
     map!(stage_cost, obj.J, obj.cost, Z)
 end
 
@@ -28,44 +28,58 @@ end
 #                              COST EXPANSIONS                                             #
 ############################################################################################
 
-function cost_gradient!(E::Objective, obj::Objective, Z::Traj, init::Bool=false)
+function cost_gradient!(E::Objective, obj::AbstractObjective, Z::RobotDynamics.AbstractTrajectory, init::Bool=false)
     is_const = E.const_grad
     N = length(Z)
     for k in eachindex(Z)
         if init || !is_const[k]
-			if is_terminal(Z[k])
-            	is_const[k] = gradient!(E.cost[k], obj.cost[k], state(Z[k]))
-			else
-            	is_const[k] = gradient!(E.cost[k], obj.cost[k], state(Z[k]), control(Z[k]))
-			end
-            dt_x = k < N ? Z[k].dt :  one(Z[k].dt)
-            dt_u = k < N ? Z[k].dt : zero(Z[k].dt)
-            E[k].q .*= dt_x
-            E[k].r .*= dt_u
+			is_const[k] = cost_gradient!(E[k], obj[k], Z[k])
         end
     end
 end
 
-function cost_hessian!(E::Objective, obj::Objective, Z::Traj, init::Bool=false)
+function cost_gradient!(E::QuadraticCostFunction, cost::CostFunction, z::AbstractKnotPoint)
+    if is_terminal(z)
+        is_const = gradient!(E, cost, state(z))
+		dt_x = one(z.dt)
+		dt_u = zero(z.dt)
+    else
+        is_const = gradient!(E, cost, state(z), control(z))
+		dt_x = z.dt
+		dt_u = z.dt
+    end
+    E.q .*= dt_x
+    E.r .*= dt_u
+	return is_const
+end
+
+function cost_hessian!(E::Objective, obj::AbstractObjective, Z::RobotDynamics.AbstractTrajectory, init::Bool=false)
     is_const = E.const_hess
     N = length(Z)
     for k in eachindex(Z)
         if init || !is_const[k]
-			if is_terminal(Z[k])
-            	is_const[k] = hessian!(E.cost[k], obj.cost[k], state(Z[k]))
-			else
-            	is_const[k] = hessian!(E.cost[k], obj.cost[k], state(Z[k]), control(Z[k]))
-			end
-            dt_x = k < N ? Z[k].dt :  one(Z[k].dt)
-            dt_u = k < N ? Z[k].dt : zero(Z[k].dt)
-            E[k].Q .*= dt_x
-            E[k].R .*= dt_u
-            E[k].H .*= dt_u
+			is_const[k] = cost_hessian!(E[k], obj[k], Z[k])
         end
     end
 end
 
-function cost_expansion!(E::Objective, obj::Objective, Z::Traj, init::Bool=false)
+function cost_hessian!(E::QuadraticCostFunction, cost::CostFunction, z::AbstractKnotPoint)
+    if is_terminal(z)
+        is_const = hessian!(E, cost, state(z))
+		dt_x = one(z.dt)
+		dt_u = zero(z.dt)
+    else
+        is_const = hessian!(E, cost, state(z), control(z))
+		dt_x = z.dt
+		dt_u = z.dt
+    end
+    E.Q .*= dt_x
+    E.R .*= dt_u
+    E.H .*= dt_u
+	return is_const
+end
+
+function cost_expansion!(E::Objective, obj::AbstractObjective, Z::Traj, init::Bool=false)
     cost_gradient!(E, obj, Z, init)
     cost_hessian!(E, obj, Z, init)
     return nothing

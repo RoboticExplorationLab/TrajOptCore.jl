@@ -51,6 +51,15 @@ end
 @inline sense(::GoalConstraint) = Equality()
 @inline Base.length(con::GoalConstraint{P}) where P = P
 @inline state_dim(con::GoalConstraint) = con.n
+@inline is_bound(con::GoalConstraint) = true
+function primal_bounds!(zL,zU,con::GoalConstraint)
+	for i in con.inds
+		zL[i] = 0
+		zU[i] = 0
+	end
+	return true
+end
+
 evaluate(con::GoalConstraint, x::SVector) = x[con.inds] - con.xf
 function jacobian!(∇c, con::GoalConstraint, z::KnotPoint)
 	T = eltype(∇c)
@@ -60,9 +69,12 @@ function jacobian!(∇c, con::GoalConstraint, z::KnotPoint)
 	return true
 end
 
+∇jacobian!(G, con::GoalConstraint, z::AbstractKnotPoint, λ::AbstractVector) = true # zeros
+
 function change_dimension(con::GoalConstraint, n::Int, m::Int, xi=1:n, ui=1:m)
 	GoalConstraint(n, con.xf, xi[con.inds])
 end
+
 
 
 ############################################################################################
@@ -463,7 +475,7 @@ function evaluate(bnd::BoundConstraint, z::AbstractKnotPoint)
 	[(z.z - bnd.z_max); (bnd.z_min - z.z)][bnd.inds]
 end
 
-function jacobian!(∇c, bnd::BoundConstraint{U,L}, z::AbstractKnotPoint) where {U,L}
+function jacobian!(∇c, bnd::BoundConstraint, z::AbstractKnotPoint)
 	for i in bnd.i_max
 		∇c[i]  = 1
 	end
@@ -472,6 +484,8 @@ function jacobian!(∇c, bnd::BoundConstraint{U,L}, z::AbstractKnotPoint) where 
 	end
 	return true
 end
+
+∇jacobian!(G, bnd::BoundConstraint, z::AbstractKnotPoint, λ::AbstractVector) = true  # zeros
 
 function change_dimension(con::BoundConstraint, n::Int, m::Int, ix=1:n, iu=1:m)
 	n0,m0 = con.n, con.m
@@ -484,6 +498,32 @@ function change_dimension(con::BoundConstraint, n::Int, m::Int, ix=1:n, iu=1:m)
 	u_max[iu] = con.z_max[n0 .+ (1:m0)]
 	u_min[iu] = con.z_min[n0 .+ (1:m0)]
 	BoundConstraint(n, m, x_max=x_max, x_min=x_min, u_max=u_max, u_min=u_min)
+end
+
+function primal_bounds!(zL, zU, bnd::BoundConstraint)
+	for i = 1:length(zL)
+		zL[i] = max(bnd.z_min[i], zL[i])
+		zU[i] = min(bnd.z_max[i], zU[i])
+	end
+	return true
+end
+
+function copy_bounds!(zL, zU, bnd::BoundConstraint, inds)
+	n,m = state_dim(bnd), control_dim(bnd)
+	NN = length(zL)
+	isequal = NN % (n+m) == 0
+	N = isequal ? Int(NN / (n+m)) : Int((NN+m)/(n+m))
+	for (i,k) in enumerate(inds)
+		off = (k-1)*(n+m)
+		if !isequal && k == N  # don't allow the indexing to go out of bounds at the last time step
+			zind = off .+ 1:n
+		else
+			zind = off .+ (1:n+m)
+		end
+		zL[zind] .= max.(bnd.z_min, zL[zind])  # take the most restrictive bound
+		zU[zind] .= min.(bnd.z_max, zU[zind])
+	end
+	return nothing
 end
 
 ############################################################################################

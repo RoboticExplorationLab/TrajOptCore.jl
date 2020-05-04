@@ -115,6 +115,12 @@ function jacobian!(conSet::AbstractConstraintSet, Z::ATraj)
     end
 end
 
+function ∇jacobian!(G::Vector{<:Matrix}, conSet::AbstractConstraintSet, Z::ATraj, λ::Vector{<:Vector})
+	for (i,conval) in enumerate(get_convals(conSet))
+		∇jacobian!(G[i], conval, Z, λ[i])
+	end
+end
+
 function error_expansion!(conSet::AbstractConstraintSet, model::AbstractModel, G)
 	@assert get_convals(conSet) == get_errvals(conSet)
 	return nothing

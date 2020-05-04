@@ -132,6 +132,15 @@ widths(con::CoupledControlConstraint, n=0, m=control_dim(con)) = (m,m)
 "Is the constraint a bound constraint or not"
 @inline is_bound(con::AbstractConstraint) = false
 
+"""
+	primal_bounds!(zL, zU, con::AbstractConstraint)
+
+Set the lower `zL` and upper `zU` bounds on the primal variables imposed by the constraint
+`con`. Return whether or not the vectors `zL` or `zU` could be modified by `con`
+(i.e. if the constraint `con` is a bound constraint).
+"""
+primal_bounds!(zL, zU, con::AbstractConstraint) = false
+
 "Check whether the constraint is consistent with the specified state and control dimensions"
 @inline check_dims(con::StateConstraint,n,m) = state_dim(con) == n
 @inline check_dims(con::ControlConstraint,n,m) = control_dim(con) == m
@@ -144,6 +153,18 @@ get_dims(con::Union{ControlConstraint,CoupledControlConstraint}, nm::Int) =
 get_dims(con::AbstractConstraint, nm::Int) = state_dim(con), control_dim(con)
 
 con_label(::AbstractConstraint, i::Int) = "index $i"
+
+"""
+	get_inds(con::AbstractConstraint)
+
+Get the indices of the joint state-control vector that are used to calculate the constraint.
+If the constraint depends on more than one time step, the indices start from the beginning
+of the first one.
+"""
+get_inds(con::StateConstraint, n, m) = (1:n,)
+get_inds(con::ControlConstraint, n, m) = (n .+ (1:m),)
+get_inds(con::StageConstraint, n, m) = (1:n+m,)
+get_inds(con::CoupledConstraint, n, m) = (1:n+m, n+m+1:2n+2m)
 
 """
 	get_z(con::AbstractConstraint, z1::AbstractKnotPoint, z2::AbstractKnotPoint)
@@ -210,17 +231,55 @@ For W<:General,this must function must be explicitly defined. Other types may de
 	if desired.
 """
 function jacobian!(∇c::VecOrMat{<:AbstractMatrix}, con::StageConstraint,
-		Z::ATraj, inds=1:length(Z))
+		Z::ATraj, inds=1:length(Z), is_const=ones(Bool,length(inds)), init::Bool=false)
 	for (i,k) in enumerate(inds)
-		jacobian!(∇c[i], con, Z[k])
+		if init || !is_const[i]
+			is_const[i] = jacobian!(∇c[i], con, Z[k])
+		end
 	end
 end
 
 function jacobian!(∇c::VecOrMat{<:AbstractMatrix}, con::CoupledConstraint,
-		Z::ATraj, inds=1:size(∇c,1))
+		Z::ATraj, inds=1:size(∇c,1), is_const=ones(Bool,length(inds)), init::Bool=false)
 	for (i,k) in enumerate(inds)
-		jacobian!(∇c[i,1], con, Z[k], Z[k+1], 1)
-		jacobian!(∇c[i,2], con, Z[k], Z[k+1], 2)
+		if init || !is_const[i]
+			is_const[i] = jacobian!(∇c[i,1], con, Z[k], Z[k+1], 1)
+			is_const[i] = jacobian!(∇c[i,2], con, Z[k], Z[k+1], 2)
+		end
+	end
+end
+
+"""
+    ∇jacobian!(G, con::AbstractConstraint, Z, λ, inds, is_const, init)
+    ∇jacobian!(G, con::AbstractConstraint, Z::AbstractKnotPoint, λ::AbstractVector)
+
+Evaluate the second-order expansion of the constraint `con` along the trajectory `Z`
+after multiplying by the lagrange multiplier `λ`.
+
+The method for each constraint should calculate the Jacobian of the vector-Jacobian product,
+    and therefore should be of size n × n if the input dimension is n.
+
+Importantly, this method should ADD and not overwrite the contents of `G`, since this term
+is dependent upon all the constraints acting at that time step.
+"""
+function ∇jacobian!(G::VecOrMat{<:AbstractMatrix}, con::StageConstraint,
+		Z::ATraj, λ::Vector{<:AbstractVector},
+		inds=1:length(Z), is_const=ones(Bool,length(inds)), init::Bool=false)
+	for (i,k) in enumerate(inds)
+		if init || !is_const[i]
+			is_const[i] = ∇jacobian!(G[i], con, Z[k], λ[i])
+		end
+	end
+end
+
+function ∇jacobian!(G::VecOrMat{<:AbstractMatrix}, con::CoupledConstraint,
+		Z::ATraj, λ::Vector{<:AbstractVector},
+		inds=1:length(Z), is_const=ones(Bool,length(inds)), init::Bool=false)
+	for (i,k) in enumerate(inds)
+		if init || !is_const[i]
+			is_const[i] = ∇jacobian!(G[i,1], con, Z[k], Z[k+1], λ[i], 1)
+			is_const[i] = ∇jacobian!(G[i,2], con, Z[k], Z[k+1], λ[i], 2)
+		end
 	end
 end
 
@@ -241,6 +300,28 @@ function jacobian!(∇c, con::StageConstraint, x::StaticVector)
 	eval_c(x) = evaluate(con, x)
 	∇c .= ForwardDiff.jacobian(eval_c, x)
 	return false
+end
+
+@inline ∇jacobian!(G, con::StateConstraint, z::AbstractKnotPoint, λ, i=1) =
+	∇jacobian!(G, con, state(z), λ)
+@inline ∇jacobian!(G, con::ControlConstraint, z::AbstractKnotPoint, λ, i=1) =
+	∇jacobian!(G, con, control(z), λ)
+@inline ∇jacobian!(G, con::StageConstraint, z::AbstractKnotPoint, λ, i=1) =
+	∇jacobian!(G, con, state(z), control(z), λ)
+
+function ∇jacobian!(G, con::StageConstraint, x::StaticVector, λ)
+	eval_c(x) = evaluate(con, x)'λ
+	G_ = ForwardDiff.hessian(eval_c, x)
+    G .+= G_
+	return false
+end
+
+function ∇jacobian!(G, con::StageConstraint, x::StaticVector{n}, u::StaticVector{m}, λ) where {n,m}
+    ix = SVector{n}(1:n)
+    iu = SVector{m}(n .+ (1:m))
+    eval_c(z) = evaluate(con, z[ix], z[iu])'λ
+    G .+= ForwardDiff.hessian(eval_c, [x;u])
+    return false
 end
 
 # function jacobian!(∇c, con::StageConstraint, x::StaticVector, u::StaticVector)
@@ -387,4 +468,38 @@ function Base.sort!(cons::ConstraintList; rev::Bool=false)
 	permute!(cons.inds, inds)
 	permute!(cons.constraints, inds)
 	return cons
+end
+
+"""
+	primal_bounds!(zL, zU, cons::ConstraintList; remove=true)
+
+Get the lower and upper bounds on the primal variables imposed by the constraints in `cons`,
+where `zL` and `zU` are vectors of length `NN`, where `NN` is the total number of primal
+variables in the problem. Returns the modified lower bound `zL` and upper bound `zU`.
+
+If any of the bound constraints are redundant, the strictest bound is returned.
+
+If `remove = true`, these constraints will be removed from `cons`.
+"""
+function primal_bounds!(zL, zU, cons::ConstraintList, remove::Bool=true)
+	NN = length(zL)
+	n,m = cons.n, cons.m
+	isequal = NN % (n+m) == 0
+	N = isequal ? Int(NN / (n+m)) : Int((NN+m)/(n+m))
+	for (j,(inds,con)) in enumerate(zip(cons))
+		for (i,k) in enumerate(inds)
+			off = (k-1)*(n+m)
+			if !isequal && k == N  # don't allow the indexing to go out of bounds at the last time step
+				zind = off .+ (1:n)
+			else
+				zind = off .+ (1:n+m)
+			end
+			primal_bounds!(view(zL, zind), view(zU, zind), con)
+		end
+		if remove
+			deleteat!(cons.constraints, j)
+			deleteat!(cons.inds, j)
+		end
+	end
+	return zL, zU
 end

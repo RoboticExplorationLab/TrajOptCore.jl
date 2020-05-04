@@ -70,6 +70,7 @@ integration(::DynamicsConstraint{Q}) where Q = Q
 
 widths(con::DynamicsConstraint{<:Any,<:Any,N,M},n::Int=N,m::Int=M) where {N,M} = (n+m,n+m)
 widths(con::DynamicsConstraint{<:Explicit,<:Any,N,M},n::Int=N,m::Int=M) where {N,M} = (n+m,n)
+get_inds(con::DynamicsConstraint{<:Explicit}, n, m) = (1:n+m, n+m+1:2n+m)
 # width(con::DynamicsConstraint{<:Implicit,L,T,N,M,NM}) where {L,T,N,M,NM} = 2N+M
 # width(con::DynamicsConstraint{<:Explicit,L,T,N,M,NM}) where {L,T,N,M,NM} = 2NM
 ####!
@@ -116,6 +117,16 @@ function jacobian!(∇c, con::DynamicsConstraint{Q},
 	# return nothing
 end
 
+function ∇jacobian!(G, con::DynamicsConstraint{<:Explicit},
+	z::AbstractKnotPoint, z2::AbstractKnotPoint, λ, i=1)
+	if i == 1
+		dyn(x) = evaluate(con, StaticKnotPoint(z,x), z2)'λ
+		G .+= ForwardDiff.hessian(dyn, z.z)
+	elseif i == 2
+		nothing
+	end
+	return false
+end
 
 struct DynamicsVals{T,N,A}
     fVal::Vector{SVector{N,T}}

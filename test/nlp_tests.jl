@@ -5,11 +5,10 @@ using ForwardDiff
 using Test
 const TO = TrajectoryOptimization
 
-include("../src/nlp.jl")
-
 # Test NLPTraj iteration
 n,m,N = 3,2,101
-NN = N*n + (N-1)*m
+NN = num_vars(n,m,N)
+@test NN == N*n + (N-1)*m
 Z0 = Traj(n,m,0.1,N)
 Zdata = TrajData(Z0)
 Z = rand(NN)
@@ -27,11 +26,46 @@ prob = Problems.DubinsCar(:parallel_park)[1]
 add_dynamics_constraints!(prob)
 n,m,N = size(prob)
 cons = prob.constraints
-
-# Test second-order constraint term
 NN = N*n + (N-1)*m
 P = sum(num_constraints(prob))
-data = (D=spzeros(P,NN), d=zeros(P), G=spzeros(NN,NN), λ=zeros(P))
+
+# Jacobian structure
+jac = JacobianStructure(cons)
+jac.linds
+@test jac.cinds[1][1] == 1:n
+@test jac.cinds[2][1] == n .+ (1:4)
+@test jac.cinds[5][1] == (n+4) .+ (1:n)
+@test jac.cinds[5][end] == P-2n+1:P-n
+@test jac.cinds[4][1] == P-n+1:P
+@test jac.zinds[1][1] == 1:n
+@test jac.zinds[2][1] == 1:n+m
+@test jac.zinds[5][1] == 1:n+m
+@test jac.zinds[5][1,2] == (n+m) .+ (1:n)
+@test jac.zinds[5][end,1] == NN-2n-m+1:NN-n
+@test jac.zinds[5][end,2] == NN-n+1:NN
+@test jac.zinds[4][1] == NN-n+1:NN
+@test jac.linds[1][1] == 1:n^2
+@test jac.linds[2][1] == n^2 .+ (1:4*(n+m))
+@test jac.linds[5][1] == (n^2 + 4*(n+m)) .+ (1:n*(n+m))
+
+D = spzeros(P,NN)
+jacobian_structure!(D, jac)
+@test D[1:n,1:n] == reshape(1:n^2,n,n)
+@test Matrix(D[n .+ (1:4), 1:n+m]) == n^2 .+ reshape(1:4*(n+m), 4, n+m)
+@test nnz(D) == D[end,end]
+
+Dv = zeros(nnz(D))
+d = zeros(P)
+C,c = gen_convals(Dv,d,cons)
+@test C[1][1].parent.indices == (1:n^2,)
+
+D = spzeros(P,NN)
+C,c = gen_convals(D,d,cons)
+@test C[1][1].indices == (1:n,1:n)
+
+
+# Test second-order constraint term
+data = NLPData(NN, P, jac.nD)
 conSet = NLPConstraintSet(prob.model, prob.constraints, data)
 prob.Z[2].z += rand(n+m)
 conSet.λ[5][1] .= rand(n)
@@ -52,9 +86,9 @@ z = StaticKnotPoint(Z,Zdata,1)
 @test state(z) ≈ state(prob.Z[1])
 
 # Cost functions
-cost(prob) ≈ eval_f(nlp, Z)
+@test cost(prob) ≈ eval_f(nlp, Z)
 
-grad_f!(nlp, Z) ≈ ForwardDiff.gradient(x->eval_f(nlp,x), Z)
+@test grad_f!(nlp, Z) ≈ ForwardDiff.gradient(x->eval_f(nlp,x), Z)
 @btime grad_f!($nlp, $Z)
 @btime ForwardDiff.gradient(x->eval_f($nlp,x), $Z)
 
@@ -67,6 +101,8 @@ G0 .*= 0
 @btime ForwardDiff.hessian(x->eval_f($nlp,x), $Z)
 
 # Constraint Functions
+al = AugmentedLagrangianSolver(prob)
+max_violation(al)
 evaluate!(nlp.conSet, prob.Z)
 c_max = max_violation(nlp.conSet)
 c = eval_c!(nlp, Z)
@@ -102,18 +138,37 @@ r,c = get_rc(G_)
 
 
 # Test jacobian structure
-D_ = jac_structure(nlp)
-nlp.conSet.convals[1].jac[1] == reshape(1:n^2, n,n)
-nlp.conSet.convals[2].jac[1] == reshape(9 .+ (1:(n+m)*4), 4, n+m)
+D_ = jacobian_structure(nlp)
+Matrix(D_)
+
+@test D_[1:n,1:n] == reshape(1:n^2, n,n)
+@test D_[n .+ (1:4), 1:n+m] == reshape(9 .+ (1:(n+m)*4), 4, n+m)
 nlp.data.D .= 0
 jac_c!(nlp, Z)
 @test D_[end,end] == nnz(nlp.data.D)
+
+nlp_ = TrajOptNLP(prob, jac_type=:vector)
+D_ = jacobian_structure(nlp_)
+@test D_[1:n,1:n] == reshape(1:n^2, n,n)
+@test D_[n .+ (1:4), 1:n+m] == reshape(9 .+ (1:(n+m)*4), 4, n+m)
+
+nlp_ = TrajOptNLP(prob, remove_bounds=true, jac_type=:vector)
+D_ = jacobian_structure(nlp_)
+@test D_[1:n,1:2n+m] == reshape(1:(2n+m)n, n, 2n+m)
+@test Matrix(D_[n .+ (1:n), (n+m) .+ (1:2n+m)]) ≈ reshape((2n+m)n .+ (1:(2n+m)n), n, 2n+m)
+
 
 # Constraint type
 IE = constraint_type(nlp)
 @test IE[1:n] == ones(n)             # initial state constraint
 @test IE[n .+ (1:4)] == zeros(4)     # bound constraint
 @test IE[(n+4) .+ (1:n)] == ones(n)  # dynamics constraint
+
+cL,cU = constraint_bounds(nlp)
+@test cL[1:n] == zeros(n)
+@test cL[n .+ (1:4)] == fill(-Inf,4)     # bound constraint
+@test cL[(n+4) .+ (1:n)] == zeros(n)  # dynamics constraint
+@test all(cU .== 0 )
 
 # Test bounds removal
 cons = prob.constraints
@@ -131,5 +186,16 @@ primal_bounds!(zL, zU, cons, false)
 @test length(cons) == 5
 cons2 = copy(cons)
 primal_bounds!(zL, zU, cons2, true)
-@test length(cons2) == 2
+@test length(cons2) == 1
+@test cons2[1] isa DynamicsConstraint
 @test length(cons) == 5
+
+prob = Problems.DubinsCar(:parallel_park)[1]
+add_dynamics_constraints!(prob)
+n,m,N = size(prob)
+cons = prob.constraints
+
+nlp = TrajOptNLP(prob, remove_bounds=true)
+@test length(prob.constraints) == 5  # make sure it doesn't modify the problem
+@test length(nlp.conSet.convals) == 1
+@test (zL,zU) == primal_bounds!(nlp)

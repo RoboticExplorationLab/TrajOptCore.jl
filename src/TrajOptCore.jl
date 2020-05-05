@@ -7,6 +7,8 @@ using LinearAlgebra
 using DocStringExtensions
 using ForwardDiff
 using UnsafeArrays
+using MathOptInterface
+const MOI = MathOptInterface
 
 import RobotDynamics: Implicit, Explicit, AbstractKnotPoint, DEFAULT_Q, is_terminal, state_diff, StaticKnotPoint
 import RobotDynamics: jacobian!, error_expansion!, error_expansion, state_dim, control_dim  # extended methods
@@ -111,6 +113,7 @@ include("objective.jl")
 include("abstract_constraint.jl")
 include("constraints.jl")
 include("dynamics_constraints.jl")
+include("constraint_list.jl")
 include("integration.jl")
 
 include("cost.jl")
@@ -120,7 +123,7 @@ include("convals.jl")
 # include("constraint_block.jl")
 include("problem.jl")
 include("conset.jl")
-# include("nlp.jl")
+include("nlp.jl")
 
 include("utils.jl")
 end # module

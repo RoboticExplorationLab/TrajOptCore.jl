@@ -66,7 +66,7 @@ function jacobian!(cval::ConVal, Z::ATraj, init::Bool=false)
 	if cval.iserr
 		throw(ErrorException("Can't evaluate Jacobians directly on the error state Jacobians"))
 	else
-		jacobian!(cval.jac, cval.con, Z, cval.inds)
+		jacobian!(cval.jac, cval.con, Z, cval.inds, cval.is_const[1], init)
 		# is_const = cval.is_const
 	    # for (i,k) in enumerate(cval.inds)
 		# 	if init || !is_const[i]

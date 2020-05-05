@@ -3,22 +3,46 @@ using SparseArrays
 mutable struct NLPData{T}
 	G::SparseMatrixCSC{T,Int}
 	g::Vector{T}
+	zL::Vector{T}  # primal lower bounds
+	zU::Vector{T}  # primal upper bounds
 	D::SparseMatrixCSC{T,Int}
 	d::Vector{T}
 	λ::Vector{T}
-	zL::Vector{T}  # primal lower bounds
-	zU::Vector{T}  # primal upper bounds
+	v::Vector{T}  # entries of D
+	r::Vector{Int}  # rows of D
+	c::Vector{Int}  # columns of D
+	function NLPData(G::SparseMatrixCSC, g, zL, zU, D::SparseMatrixCSC, d, λ)
+		@assert size(G) == (length(g), length(g))
+		@assert size(D) == (length(d), length(g))
+		@assert length(d) == length(λ)
+		new{eltype(G)}(G, g, zL, zU, D, d, λ)
+	end
+	function NLPData(G::SparseMatrixCSC, g, zL, zU, D::SparseMatrixCSC, d, λ,
+			v::AbstractVector, r::Vector{Int}, c::Vector{Int})
+		@assert size(G) == (length(g), length(g))
+		@assert size(D) == (length(d), length(g))
+		@assert length(d) == length(λ)
+		@assert length(v) == length(r) == length(c)
+		new{eltype(G)}(G, g, zL, zU, D, d, λ, v, r, c)
+	end
 end
 
-function NLPData(NN::Int,P::Int)
+function NLPData(NN::Int, P::Int, nD=nothing)
 	G = spzeros(NN,NN)
 	g = zeros(NN)
+	zL = fill(-Inf,NN)
+	zU = fill(+Inf,NN)
 	D = spzeros(P,NN)
 	d = zeros(P)
 	λ = zeros(P)
-	zL = zeros(NN)
-	zU = zeros(NN)
-	NLPData(G,g,D,d,λ,zL,zU)
+	if isnothing(nD)
+		NLPData(G, g, zL, zU, D, d, λ)
+	else
+		v = zeros(nD)
+		r = zeros(Int,nD)
+		c = zeros(Int,nD)
+		NLPData(G, g, zL, zU, D, d, λ, v, r, c)
+	end
 end
 
 """
@@ -29,17 +53,18 @@ Constraint set that updates views to the NLP constraint vector and Jacobian.
 struct NLPConstraintSet{T} <: AbstractConstraintSet
     convals::Vector{ConVal}
     errvals::Vector{ConVal}
-	cinds::Vector{Vector{UnitRange{Int}}}
+	jac::JacobianStructure
 	λ::Vector{Vector{SubArray{T,1,Vector{T},Tuple{UnitRange{Int}},true}}}
 	hess::Vector{Matrix{SubArray{T,2,SparseMatrixCSC{T,Int},Tuple{UnitRange{Int},UnitRange{Int}},false}}}
 	c_max::Vector{T}
 end
 
-function NLPConstraintSet(model::AbstractModel, cons::ConstraintList, data,
-		jac_structure=:by_knotpoint; slacks::Bool=false)
+function NLPConstraintSet(model::AbstractModel, cons::ConstraintList, data;
+		jac_structure=:by_knotpoint, jac_type=:sparse)
 	if !has_dynamics_constraint(cons)
 		throw(ArgumentError("must contain a dynamics constraint"))
 	end
+	isequal = integration(cons[end]) <: Implicit
 
 	n,m = size(model)
 	n̄ = RobotDynamics.state_diff_size(model)
@@ -54,16 +79,19 @@ function NLPConstraintSet(model::AbstractModel, cons::ConstraintList, data,
 	P = sum(num_constraints(cons))
 
 	# Initialize arrays
-	D = data.D
 	d = data.d
+	if jac_type == :sparse
+		D = data.D
+	elseif jac_type == :vector
+		D = data.v
+	end
 
 	# Create ConVals as views into D and d
-	cinds = gen_con_inds(cons, jac_structure)
-	zinds = [(k-1)*(n+m) .+ (1:n+m) for k = 1:N]
+	jac = JacobianStructure(cons)
+	C,c = gen_convals(D, d, cons, jac)
 	useG = model isa LieGroupModel
-	errvals = map(enumerate(zip(cons))) do (i,(inds,con))
-		C,c = TrajOptCore.gen_convals(D, d, cinds[i], zinds, con, inds)
-		ConVal(n̄, m, con, inds, C, c)
+	errvals = map(1:ncon) do i
+		ConVal(n̄, m, cons[i], cons.inds[i], C[i], c[i])
 	end
 	convals = map(errvals) do errval
 		ConVal(n, m, errval)
@@ -73,13 +101,14 @@ function NLPConstraintSet(model::AbstractModel, cons::ConstraintList, data,
 
 	# Create views into the multipliers
 	λ = map(1:ncon) do i
-		map(cinds[i]) do ind
+		map(jac.cinds[i]) do ind
 			view(data.λ, ind)
 		end
 	end
 
 	# Create views into the Hessian matrix
 	G = data.G
+	zinds = gen_zinds(n,m,N,isequal)
 	hess1 = map(zip(cons)) do (inds,con)
 		zind = get_inds(con, n̄, m)[1]
 		map(enumerate(inds)) do (i,k)
@@ -102,7 +131,7 @@ function NLPConstraintSet(model::AbstractModel, cons::ConstraintList, data,
 		[h1 h2]
 	end
 
-	NLPConstraintSet(convals, errvals, cinds, λ, hess, zeros(ncon))
+	NLPConstraintSet(convals, errvals, jac, λ, hess, zeros(ncon))
 end
 
 @inline get_convals(conSet::NLPConstraintSet) = conSet.convals
@@ -114,57 +143,6 @@ end
 
 @inline ∇jacobian!(conSet::NLPConstraintSet, Z) = ∇jacobian!(conSet.hess, conSet, Z, conSet.λ)
 
-"""
-	gen_con_inds(cons::ConstraintList, structure::Symbol)
-
-Generate the indices into the concatenated constraint vector for each constraint.
-Determines the bandedness of the Jacobian
-"""
-function gen_con_inds(conSet::ConstraintList, structure=:by_knotpoint)
-	n,m = conSet.n, conSet.m
-    N = length(conSet.p)
-    numcon = length(conSet.constraints)
-    conLen = length.(conSet.constraints)
-
-    # cons = [[@SVector ones(Int,length(con)) for j in eachindex(conSet.inds[i])]
-	# 	for (i,con) in enumerate(conSet.constraints)]
-	cons = [[1:0 for j in eachindex(conSet.inds[i])] for i in 1:length(conSet)]
-
-    # Dynamics and general constraints
-    idx = 0
-	if structure == :by_constraint
-	    for (i,con) in enumerate(conSet.constraints)
-			for (j,k) in enumerate(conSet.inds[i])
-				cons[i][TrajOptCore._index(con,k)] = idx .+ (1:conLen[i])
-				idx += conLen[i]
-	        end
-	    end
-	elseif structure == :by_knotpoint
-		for k = 1:N
-			for (i,con) in enumerate(conSet.constraints)
-				inds = conSet.inds[i]
-				if k in inds
-					j = k -  inds[1] + 1
-					cons[i][j] = idx .+ (1:conLen[i])
-					idx += conLen[i]
-				end
-			end
-		end
-	elseif structure == :by_block
-		sort!(conSet)  # WARNING: may modify the input
-		idx = zeros(Int,N)
-		for k = 1:N
-			for (i,(inds,con)) in enumerate(zip(conSet))
-				if k ∈ inds
-					j = k - inds[1] + 1
-					cons[i][j] = idx[k] .+ (1:length(con))
-					idx[k] += length(con)
-				end
-			end
-		end
-	end
-    return cons
-end
 
 """
 	QuadraticViewCost{n,m,T}
@@ -379,7 +357,7 @@ end
 """
 	TrajOptNLP{n,m,T}
 """
-struct TrajOptNLP{n,m,T}
+struct TrajOptNLP{n,m,T} <: MOI.AbstractNLPEvaluator
 	model::AbstractModel
 	zinds::Vector{UnitRange{Int}}
 
@@ -397,19 +375,28 @@ struct TrajOptNLP{n,m,T}
 	Z::NLPTraj{n,m,T}
 end
 
-function TrajOptNLP(prob::Problem; remove_bounds::Bool=false)
+function TrajOptNLP(prob::Problem; remove_bounds::Bool=false, jac_type=:sparse)
 	n,m,N = size(prob)
 	NN = N*n + (N-1)*m  # number of primal variables
-	P = sum(num_constraints(prob))
 
-	data = NLPData(NN,P)
-
-	conSet = NLPConstraintSet(prob.model, prob.constraints, data)
+	cons = get_constraints(prob)
 
 	# Remove goal and bound constraints and store them in data.zL and data.zU
+	zL = fill(-Inf,NN)
+	zU = fill(+Inf,NN)
 	if remove_bounds
-		primal_bounds!(data.zL, data.zU, get_constraints(prob), true)
+		cons = copy(cons)
+		primal_bounds!(zL, zU, cons, true)
+		num_constraints!(cons)
 	end
+	P = sum(num_constraints(cons))
+	jac = JacobianStructure(cons)
+
+	data = NLPData(NN, P, jac.nD)
+	data.zL = zL
+	data.zU = zU
+
+	conSet = NLPConstraintSet(prob.model, cons, data, jac_type=jac_type)
 
 	Zdata = TrajData(prob.Z)
 	zinds = [(k-1)*(n+m) .+ (1:n+m) for k = 1:N-1]
@@ -419,9 +406,6 @@ function TrajOptNLP(prob::Problem; remove_bounds::Bool=false)
 			data.G, data.g, QuadraticCost{Float64}(n, m, terminal=(k==N)),k)
 			for k = 1:N])
 
-	Z = Primals(prob)
-	dZ = Primals(prob)
-	Z̄ = Primals(prob)
 	Z = NLPTraj(zeros(NN), Zdata)
 	TrajOptNLP(prob.model, zinds, data, prob.obj, E, conSet, Z)
 end
@@ -439,7 +423,7 @@ function eval_f(nlp::TrajOptNLP, Z=nlp.Z.Z)
 	if eltype(Z) !== eltype(nlp.Z.Z)
 		Z_ = NLPTraj(Z, nlp.Z.Zdata)
 	else
-		nlp.Z.Z = 	Z
+		nlp.Z.Z = Z
 		Z_ = nlp.Z
 	end
 	return cost(nlp.obj, Z_)
@@ -455,7 +439,7 @@ function grad_f!(nlp::TrajOptNLP, Z, g=nlp.data.g)
 	nlp.Z.Z = Z
 	cost_gradient!(nlp.E, nlp.obj, nlp.Z)
 	if g !== nlp.data.g
-		g .= nlp.g  # TODO: reset views instead of copying
+		g .= nlp.data.g  # TODO: reset views instead of copying
 	end
 	return g
 end
@@ -533,7 +517,7 @@ function eval_c!(nlp::TrajOptNLP, Z, c=nlp.data.d)
 	end
 	evaluate!(nlp.conSet, Z_)
 	if c !== nlp.data.d
-		copyto!(c, nlp.conSet.d)  # TODO: reset views instead of copying
+		copyto!(c, nlp.data.d)  # TODO: reset views instead of copying
 	end
 	return c
 end
@@ -543,11 +527,13 @@ end
 
 Evaluate the constraint Jacobian at `Z`, storing the result in `C`.
 """
-function jac_c!(nlp::TrajOptNLP, Z, C=nlp.data.D)
+function jac_c!(nlp::TrajOptNLP, Z, C::AbstractMatrix=nlp.data.D)
 	nlp.Z.Z = Z
 	jacobian!(nlp.conSet, nlp.Z)
-	if C !== nlp.data.D
-		copyto!(C, nlp.conSet.D)  # TODO: reset views instead of copying
+	if C isa AbstractMatrix && C !== nlp.data.D
+		copyto!(C, nlp.data.D)  # TODO: reset views instead of copying
+	elseif C isa AbstractVector && C != nlp.data.v
+		copyto!(C, nlp.data.v)
 	end
 	return C
 end
@@ -559,31 +545,8 @@ Returns a sparse matrix `D` of the same size as the constraint Jacobian, corresp
 the sparsity pattern of the constraint Jacobian. Additionally, `D[i,j]` is either zero or
 a unique index from 1 to `nnz(D)`.
 """
-function jac_structure(nlp::TrajOptNLP)
-	N = num_knotpoints(nlp)
-	NN = num_vars(nlp)
-	P = num_constraints(nlp)
-	D = spzeros(Int, P, NN)
-	conSet = nlp.conSet
-	idx = 0
-	for k = 1:N
-		for (i,conval) in enumerate(get_convals(conSet))
-			p = length(conval.con)
-			if k in conval.inds
-				for (l,w) in enumerate(widths(conval.con))
-					blk_len = p*w
-					inds = reshape(idx .+ (1:blk_len), p, w)
-					j = _index(conval,k)
-					# linds[i][j] = inds
-					conval.jac[j,l] .= inds
-					idx += blk_len
-				end
-			end
-		end
-	end
-	copyto!(D, nlp.data.D)
-	return D
-end
+@inline jacobian_structure(nlp::TrajOptNLP) = jacobian_structure(nlp.conSet.jac)
+
 
 """
 	hess_L(nlp::TrajOptNLP, Z, λ, G)
@@ -621,7 +584,9 @@ function primal_bounds!(nlp::TrajOptNLP, zL=nlp.data.zL, zU=nlp.data.zU)
 		nlp.data.zL = zL
 		nlp.data.zU = zU
 	end
+	return zL, zU
 end
+
 
 """
 	constraint_type(nlp::TrajOptNLP)
@@ -641,11 +606,71 @@ function constraint_type!(nlp::TrajOptNLP, IE)
 	conSet = nlp.conSet
 	for i = 1:length(conSet)
 		conval = conSet.convals[i]
-		cinds = conSet.cinds[i]
+		cinds = conSet.jac.cinds[i]
 		for j = 1:length(cinds)
 			v = sense(conval.con) == Equality() ? 1 : 0
 			IE[cinds[j]] .= v
 		end
 	end
 	return IE
+end
+
+function constraint_bounds(nlp::TrajOptNLP)
+	IE = constraint_type(nlp)
+	P = length(IE)
+	cL = zeros(P)
+	cU = zeros(P)
+	for i = 1:P
+		if IE[i] == 0  # Inequality
+			cL[i] = -Inf
+		elseif i == 1  # Equality
+			cL[i] = 0
+		end
+		cU[i] = 0
+	end
+	return cL, cU
+end
+
+MOI.features_available(nlp::TrajOptNLP) = [:Grad, :Jac]
+MOI.initialize(nlp::TrajOptNLP, features) = nothing
+
+function MOI.jacobian_structure(nlp::TrajOptNLP)
+	D = jac_structure(nlp)
+	r,c = get_rc(D)
+	collect(zip(r,c))
+end
+
+MOI.hessian_lagrangian_structure(nlp::TrajOptNLP) = []
+
+@inline MOI.eval_objective(nlp::TrajOptNLP, Z) = eval_f(nlp, Z)
+@inline MOI.eval_objective_gradient(nlp::TrajOptNLP, grad_f, Z) = grad_f!(nlp, Z, grad_f)
+@inline MOI.eval_constraint(nlp::TrajOptNLP, g, Z) = eval_c!(nlp, Z, g)
+@inline MOI.eval_constraint_jacobian(nlp::TrajOptNLP, jac, Z) = jac_c!(nlp, Z, jac)
+@inline MOI.eval_hessian_lagrangian(::TrajOptNLP, H, x, σ, μ) = nothing
+
+function solve_MOI(nlp::TrajOptNLP, optimizer::MOI.AbstractOptimizer)
+	NN = num_vars(nlp)
+
+	zL,zU = primal_bounds!(nlp)
+
+	has_objective = true
+	cL,cU = constraint_bounds(nlp)
+	nlp_bounds = MOI.NLPBoundsPair.(cL, cU)
+	block_data = MOI.NLPBlockData(nlp_bounds, nlp, has_objective)
+
+	Z = MOI.add_variables(optimizer, NN)
+	MOI.add_constraints(optimizer, Z, MOI.LessThan.(zU))
+	MOI.add_constraints(optimizer, Z, MOI.GreaterThan.(zL))
+
+	MOI.set(optimizer, MOI.VariablePrimalStart(), Z, nlp.Z.Z)
+
+	MOI.set(optimizer, MOI.NLPBlock(), block_data)
+	MOI.set(optimizer, MOI.ObjectiveSense(), MOI.MIN_SENSE)
+
+	# return optimizer
+	MOI.optimize!(optimizer)
+	V = [MOI.VariableIndex(k) for k = 1:NN]
+	res = MOI.get(optimizer, MOI.VariablePrimal(), V)
+	copyto!(nlp.Z.Z, res)
+	return nlp
 end

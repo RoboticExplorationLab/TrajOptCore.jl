@@ -13,14 +13,6 @@ state_dim(con::AbstractDynamicsConstraint) = size(con.model)[1]
 control_dim(con::AbstractDynamicsConstraint) = size(con.model)[2]
 Base.length(con::AbstractDynamicsConstraint) = size(con.model)[1]
 
-function has_dynamics_constraint(conSet::ConstraintList)
-	for con in conSet
-		if con isa DynamicsConstraint
-			return true
-		end
-	end
-	return false
-end
 
 """ $(TYPEDEF)
 An equality constraint imposed by the discretized system dynamics. Links adjacent time steps.

@@ -107,7 +107,7 @@ controls(::Traj)
 ```
 Get the control trajectory
 "
-RobotDynamics.controls(prob::Problem) = controls(prob.Z)
+controls(prob::Problem) = controls(prob.Z)
 
 "```julia
 states(::Problem)
@@ -116,7 +116,7 @@ states(::Traj)
 ```
 Get the state trajectory
 "
-RobotDynamics.states(prob::Problem) = states(prob.Z)
+states(prob::Problem) = states(prob.Z)
 
 "```julia
 initial_trajectory!(::Problem, Z)
@@ -206,7 +206,7 @@ function Problem{Q}(p::Problem) where Q
     Problem{Q}(p.model, p.obj, p.constraints, p.x0, p.xf, p.Z, p.N, p.t0, p.tf)
 end
 
-@inline RobotDynamics.rollout!(prob::Problem) = rollout!(prob.model, prob.Z, prob.x0)
+@inline rollout!(prob::Problem) = rollout!(prob.model, prob.Z, prob.x0)
 
 function Problem(p::Problem; model=p.model, obj=p.obj, constraints=p.constraints,
     x0=p.x0, xf=p.xf, t0=p.t0, tf=p.tf)

@@ -8,13 +8,16 @@ using DocStringExtensions
 using ForwardDiff
 using UnsafeArrays
 
-import RobotDynamics: Implicit, Explicit, AbstractKnotPoint, DEFAULT_Q, is_terminal, state_diff, StaticKnotPoint
-import RobotDynamics: jacobian!, error_expansion!, error_expansion, state_dim, control_dim  # extended methods
+import RobotDynamics: Implicit, Explicit, AbstractKnotPoint, DEFAULT_Q, is_terminal, state_diff,
+	StaticKnotPoint, state_diff_jacobian!, state_diff_jacobian
+import RobotDynamics: jacobian!, state_dim, control_dim  # extended methods
 
 # re-export
 import RobotDynamics: KnotPoint
 export
-	KnotPoint
+	KnotPoint,
+	Traj,
+	rollout!
 
 # problems
 export
@@ -80,7 +83,9 @@ export
     findmax_violation,
     is_bound,
     upper_bound,
-    lower_bound
+    lower_bound,
+	states,
+	controls
 
 # implemented constraints
 export
@@ -103,6 +108,7 @@ export
     add_constraint!,
 	num_constraints
 
+include("trajectories.jl")
 include("expansions.jl")
 include("costfunctions.jl")
 include("objective.jl")

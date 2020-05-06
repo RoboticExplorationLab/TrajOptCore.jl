@@ -302,7 +302,7 @@ function gradient!(E::QuadraticCost, cost::QuadraticCost, x, u)
     return false
 end
 
-function hessian!(E::QuadraticCost, cost::QuadraticCost, x, u)
+function hessian!(E::QuadraticCost, cost::QuadraticCost, x)
     E.Q .= cost.Q
     return true
 end
